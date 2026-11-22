@@ -27,6 +27,8 @@ export function claims(token: string): Claims {
 }
 
 const NOT_SIGNED_IN = 'GPT-Live needs your ChatGPT subscription. Run /connect, choose OpenAI, then "ChatGPT Pro/Plus".'
+const NO_ACCOUNT =
+  'Your ChatGPT sign-in has no account ID, which GPT-Live needs. "Sign in with ChatGPT" logins hide it. Connect OpenAI again with "Codex browser (legacy)".'
 
 /**
  * Finds the ChatGPT sign-in among the OpenAI connections. OpenCode refreshes the
@@ -59,5 +61,8 @@ export async function resolveAuth(ctx: Context): Promise<AuthResult> {
     if (!accountID) continue
     return { ok: true, auth: { token: credential.access, accountID }, plan: claim.chatgpt_plan_type }
   }
-  return { ok: false, reason: NOT_SIGNED_IN }
+  return {
+    ok: false,
+    reason: credentials.some((credential) => credential?.type === "oauth") ? NO_ACCOUNT : NOT_SIGNED_IN,
+  }
 }
