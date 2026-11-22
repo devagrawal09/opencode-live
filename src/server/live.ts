@@ -7,7 +7,7 @@
  * feature. None of it is a documented public API, so everything OpenAI-specific lives here.
  */
 
-export const MODEL = "gpt-live-1-codex"
+export const MODEL = "gpt-live-1.1-codex"
 const CALL_URL = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
 const SIDEBAND_URL = "wss://api.openai.com/v1/live/"
 const APPEND_MAX_BYTES = 500
