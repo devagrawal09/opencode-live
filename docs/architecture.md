@@ -89,6 +89,25 @@ flowchart LR
   `turns/<voiceSessionID>` (the last turns, replayed as background at the next call). `/voice-new` starts a fresh
   voice session.
 
+## The desktop part
+
+`gui.tsx` is the `./gui-experimental` entry for OpenCode Desktop, bundled by `vite build` into
+`dist/gui-experimental.cjs`. It replaces both the terminal plugin and the native helper and talks to the same server
+plugin over the `GptLive` RPC, on the server of the session the call is about.
+
+| Path                   | What lives there                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `src/gui/window.tsx`   | Window setup: commands, the voice call panel, the composer pill.                        |
+| `src/gui/call.ts`      | The window's call state, RPC calls and events, heartbeats; the desktop `controller.ts`. |
+| `src/gui/transport.ts` | WebRTC in the window: microphone, peer, `oai-events` data channel, speaker, levels.     |
+| `src/gui/main.ts`      | Electron main: macOS microphone access, background throttling, hanging up on close.     |
+| `src/gui/contract.ts`  | The `Ipc` between a window and main.                                                    |
+
+The window negotiates what the helper does (one Opus send/receive track, the `oai-events` channel, every ICE candidate
+in the offer), opening the microphone first so the offer carries real host candidates. While a call is up, main turns
+off the window's background throttling so heartbeats keep their 5-second rhythm, and, for calls on the app's own
+server, it ends the call as soon as its window closes rather than when the heartbeats stop.
+
 ## The native helper
 
 `gpt-live-host` exists because WebRTC with echo cancellation needs real-time audio threads, which a TypeScript plugin

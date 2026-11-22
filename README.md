@@ -116,6 +116,23 @@ The aura picks the best way your terminal can draw it:
 
 Voice, commands and the transcript work the same everywhere.
 
+### OpenCode Desktop
+
+The plugin also has an experimental desktop part (`./gui-experimental`). OpenCode Desktop loads it for plugins listed in
+the global `opencode.json(c)`. In a desktop window the call runs in the window itself, with Chromium's WebRTC, echo
+cancellation and noise suppression, so the native helper is not used; the first call asks macOS for microphone access
+for OpenCode.
+
+| Desktop                    | Action                                                                 |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `/voice`, `Cmd/Ctrl+Alt+V` | Start a call on the current session, or end it                         |
+| `Cmd/Ctrl+Alt+M`           | Mute or unmute                                                         |
+| `/voice-new`               | Start a call in a new voice conversation                               |
+| Voice call panel           | Call state, levels, live transcript and tasks (side panel **+** menu)  |
+| Composer pill              | Live or muted state above the composer; mute, show the panel, end call |
+
+From a local checkout, build the bundle first with `bun run build:gui` (or `bun run dev:gui` to rebuild on changes).
+
 ## Configuration
 
 Pass options with the object form of the plugin entry. Every option is optional.
