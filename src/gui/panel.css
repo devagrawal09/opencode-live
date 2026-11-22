@@ -1,0 +1,200 @@
+.gptlive-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  box-sizing: border-box;
+  color: var(--text-base);
+  font-size: 13px;
+}
+
+.gptlive-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gptlive-status {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+.gptlive-meta {
+  color: var(--text-weak);
+}
+
+.gptlive-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--icon-weaker, currentColor);
+  opacity: 0.6;
+}
+
+.gptlive-dot[data-phase="connecting"],
+.gptlive-dot[data-phase="closing"] {
+  background: var(--icon-warning-base, orange);
+  opacity: 1;
+  animation: gptlive-pulse 1.2s ease-in-out infinite;
+}
+
+.gptlive-dot[data-phase="live"] {
+  background: var(--icon-success-base, green);
+  opacity: 1;
+}
+
+.gptlive-dot[data-phase="live"][data-muted] {
+  background: var(--icon-warning-base, orange);
+}
+
+.gptlive-dot[data-phase="error"] {
+  background: var(--icon-critical-base, red);
+  opacity: 1;
+}
+
+@keyframes gptlive-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gptlive-dot {
+    animation: none !important;
+  }
+}
+
+.gptlive-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gptlive-note {
+  color: var(--text-weak);
+}
+
+.gptlive-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-strong);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.gptlive-levels {
+  display: grid;
+  gap: 4px;
+}
+
+.gptlive-level {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.gptlive-bar {
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface-base, rgba(127, 127, 127, 0.15));
+}
+
+.gptlive-bar > div {
+  height: 100%;
+  transform-origin: left center;
+  transition: transform 60ms linear;
+  background: var(--icon-success-base, green);
+}
+
+.gptlive-bar[data-kind="speaker"] > div {
+  background: var(--icon-diff-modified-base, violet);
+}
+
+.gptlive-activity {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.gptlive-entries {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-weak-base, rgba(127, 127, 127, 0.2));
+}
+
+.gptlive-empty {
+  color: var(--text-weak);
+  padding-top: 8px;
+}
+
+.gptlive-line {
+  display: grid;
+  gap: 2px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gptlive-line[data-past] {
+  opacity: 0.55;
+}
+
+.gptlive-speaker {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-weak);
+}
+
+.gptlive-line[data-role="assistant"] .gptlive-speaker {
+  color: var(--text-strong);
+}
+
+.gptlive-notice {
+  font-size: 12px;
+  color: var(--text-weak);
+}
+
+.gptlive-notice[data-tone="error"] {
+  color: var(--text-error, red);
+}
+
+.gptlive-task {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-raised-base, rgba(127, 127, 127, 0.08));
+  overflow-wrap: anywhere;
+}
+
+.gptlive-badge {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-weak);
+}
+
+.gptlive-task[data-status="running"] .gptlive-badge {
+  color: var(--icon-warning-base, orange);
+}
+
+.gptlive-task[data-status="done"] .gptlive-badge {
+  color: var(--icon-success-base, green);
+}
+
+.gptlive-task[data-status="failed"] .gptlive-badge {
+  color: var(--icon-critical-base, red);
+}
