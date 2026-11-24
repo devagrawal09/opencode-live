@@ -128,10 +128,33 @@ for OpenCode.
 | `/voice`, `Cmd/Ctrl+Alt+V` | Start a call on the current session, or end it                         |
 | `Cmd/Ctrl+Alt+M`           | Mute or unmute                                                         |
 | `/voice-new`               | Start a call in a new voice conversation                               |
+| `/voice-pick`              | Open **Settings › GPT-Live** to choose the voice and speaking pace     |
 | Voice call panel           | Call state, levels, live transcript and tasks (side panel **+** menu)  |
 | Composer pill              | Live or muted state above the composer; mute, show the panel, end call |
 
+The settings page's voice and pace override the `voice` and `pace` options in desktop windows and apply to the next
+call; a call that is up keeps its voice.
+
 From a local checkout, build the bundle first with `bun run build:gui` (or `bun run dev:gui` to rebuild on changes).
+
+#### Wake word (experimental)
+
+Run **Start listening for wake word** from the command palette (or **Listen for "Hey Jarvis"** in the voice call
+panel), then say "Hey Jarvis" to start a call hands-free: a short chime plays, the call connects, and you say what you
+want. GPT-Live skips its greeting. A call started this way hangs up by itself after 20 seconds with no talking, no
+queued tasks and nothing working, and the window goes back to listening. The setting is remembered; run **Stop
+listening for wake word** to turn it off.
+
+- **Privacy.** Detection runs on your Mac, in the window, with [LiveKit WakeWord](https://github.com/livekit/livekit-wakeword)'s
+  "hey jarvis" model (Apache-2.0) on ONNX Runtime. Nothing is sent to OpenAI, or anywhere else, until the wake word is
+  heard; only then does a call start. The first time, the app downloads the model (7 MB, from LiveKit's GitHub release)
+  and ONNX Runtime's WebAssembly (15 MB, from jsDelivr), checks both against pinned SHA-256 digests, and caches them in
+  its data folder.
+- **The microphone stays on** while listening, so macOS shows its orange microphone dot the whole time.
+- **A window must stay open.** One window listens at a time (the one you turned it on in, or another if it closes); it
+  keeps listening in the background, but not once every window is closed. The call uses that window's current session.
+- **False wakes happen** (LiveKit measures 0.5 to 2.5 an hour on conversational speech): they start a short call that
+  hangs up after 20 seconds of quiet. A wake word heard while another window has a call up is ignored.
 
 ## Configuration
 
@@ -154,7 +177,8 @@ Pass options with the object form of the plugin entry. Every option is optional.
 
 | Option                   | Default                                                    | Description                                                                                                          |
 | ------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `voice`                  | `"cove"`                                                   | GPT-Live's voice: `cove`, `juniper`, `maple`, `spruce`, `ember`, `vale`, `breeze`, `arbor` or `sol`.                 |
+| `voice`                  | `"cove"`                                                   | GPT-Live's voice. See [Voices](#voices).                                                                             |
+| `pace`                   | `"normal"`                                                 | Speaking-pace hint: `normal`, `slower` or `faster`. Adds one sentence to GPT-Live's prompt; not an exact speed.      |
 | `keybinds`               | `{ toggle: "<leader>v", mute: "ctrl+y", panel: "ctrl+s" }` | Keys for `toggle`, `mute`, `panel`, `stop`, `new` and `voice`. A key, a list of keys, or `false`.                    |
 | `panel`                  | `true`                                                     | Open the transcript panel when a call starts.                                                                        |
 | `duck`                   | `true`                                                     | Turn other apps' audio down during calls and restore it afterwards.                                                  |
@@ -165,6 +189,13 @@ Pass options with the object form of the plugin entry. Every option is optional.
 | `voiceVariant`           | `"medium"`                                                 | Thinking level for that model.                                                                                       |
 | `log`                    | `true`                                                     | Keep a local log of each call (see [Privacy](#privacy)).                                                             |
 | `visual`                 | automatic                                                  | Force the aura's drawing method: `kitty`, `herdr` or `blocks`.                                                       |
+
+### Voices
+
+`cove`, `juniper`, `maple`, `spruce`, `ember`, `vale`, `breeze`, `arbor`, `sol`, `marin`, `aube`, `bubbie`, `haetsal`,
+`hanul`, `himari`, `leher`, `miko`, `neer`, `porto`, `rindo`, `rio`, `rivage`, `selva`, `sonna`, `tinta` and `viola`.
+A voice is set when a call starts and cannot change during it. GPT-Live has no speed setting, so `pace` is a hint in its
+instructions, also read when a call starts.
 
 ### Custom prompts
 
@@ -222,6 +253,8 @@ The [architecture guide](docs/architecture.md) covers each part in detail.
 - Each call writes a local log of transcripts and events to `~/.local/state/opencode-gpt-live/calls/`
   (`$XDG_STATE_HOME` if set, `%LOCALAPPDATA%` on Windows). Set `"log": false` to turn it off.
 - The voice conversation is an ordinary OpenCode session, stored like any other.
+- With the desktop wake word on, the microphone is open and listened to on your Mac only; nothing leaves it until you
+  say the wake word. See [Wake word](#wake-word-experimental).
 
 ## Troubleshooting
 

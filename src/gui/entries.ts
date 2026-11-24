@@ -12,6 +12,8 @@ export type Entry =
     }
   | { id: string; kind: "task"; taskID: string; text: string; status: TaskStatus; detail?: string }
   | { id: string; kind: "notice"; text: string; tone: "info" | "error" }
+  /** Marks where a later call in the same window starts. */
+  | { id: string; kind: "divider"; text: string }
 
 const KEPT = 200
 
@@ -49,6 +51,19 @@ export function transcript(
   const next = entries.slice()
   next[index] = { ...open, text: final ? text.trim() : open.text + text, final }
   return next
+}
+
+/**
+ * The list a new call starts from. A window keeps what earlier calls showed and marks where this one starts; only the
+ * first call in a window shows the stored turns from earlier calls, which the list would otherwise repeat.
+ */
+export function startCall(entries: readonly Entry[], label: string): Entry[] {
+  if (entries.length === 0) return []
+  return append(entries, { id: nextID(), kind: "divider", text: label })
+}
+
+export function withPast(entries: readonly Entry[], past: readonly Entry[], firstInWindow: boolean): Entry[] {
+  return firstInWindow ? [...past, ...entries] : [...entries]
 }
 
 export function task(

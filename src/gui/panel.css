@@ -72,6 +72,12 @@
   gap: 6px;
 }
 
+.gptlive-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
 .gptlive-note {
   color: var(--text-weak);
 }
@@ -161,6 +167,24 @@
   color: var(--text-strong);
 }
 
+.gptlive-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-weak);
+}
+
+.gptlive-divider::before,
+.gptlive-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-weak-base, rgba(127, 127, 127, 0.25));
+}
+
 .gptlive-notice {
   font-size: 12px;
   color: var(--text-weak);
@@ -197,4 +221,261 @@
 
 .gptlive-task[data-status="failed"] .gptlive-badge {
   color: var(--icon-critical-base, red);
+}
+
+.gptlive-events {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 40%;
+  min-height: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-weak-base, rgba(127, 127, 127, 0.2));
+}
+
+.gptlive-events-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gptlive-events-counts,
+.gptlive-events-list {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.gptlive-events-counts {
+  color: var(--text-weak);
+}
+
+.gptlive-events-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The voice agent's tab: hand-off cards, set apart from transcript rows by their left border. */
+
+.gptlive-handoff-open {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.gptlive-handoffs {
+  gap: 10px;
+}
+
+.gptlive-handoff {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px 6px 10px;
+  border-left: 2px solid var(--border-weak-base, rgba(127, 127, 127, 0.35));
+  border-radius: 0 6px 6px 0;
+  background: var(--surface-raised-base, rgba(127, 127, 127, 0.08));
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.gptlive-handoff[data-phase="running"] {
+  border-left-color: var(--icon-warning-base, orange);
+}
+
+.gptlive-handoff[data-phase="succeeded"] {
+  border-left-color: var(--icon-success-base, green);
+}
+
+.gptlive-handoff[data-phase="failed"] {
+  border-left-color: var(--icon-critical-base, red);
+}
+
+.gptlive-handoff-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.gptlive-handoff-dot {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--icon-weaker, currentColor);
+  opacity: 0.6;
+}
+
+.gptlive-handoff-dot[data-phase="running"] {
+  background: var(--icon-warning-base, orange);
+  opacity: 1;
+  animation: gptlive-pulse 1.2s ease-in-out infinite;
+}
+
+.gptlive-handoff-dot[data-phase="succeeded"] {
+  background: var(--icon-success-base, green);
+  opacity: 1;
+}
+
+.gptlive-handoff-dot[data-phase="failed"] {
+  background: var(--icon-critical-base, red);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gptlive-handoff-dot {
+    animation: none !important;
+  }
+}
+
+.gptlive-handoff-request {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.gptlive-handoff-timing {
+  color: var(--text-weak);
+  font-variant-numeric: tabular-nums;
+}
+
+.gptlive-handoff-details > summary {
+  cursor: pointer;
+  color: var(--text-weak);
+}
+
+.gptlive-handoff-details[open] {
+  display: grid;
+  gap: 6px;
+}
+
+.gptlive-handoff-section {
+  display: grid;
+  gap: 4px;
+}
+
+.gptlive-handoff-tool {
+  display: grid;
+  gap: 2px;
+}
+
+.gptlive-handoff-tool[data-status="failed"] > div:first-child {
+  color: var(--text-error, red);
+}
+
+.gptlive-handoff-code {
+  margin: 0;
+  max-height: 6.4em;
+  overflow: auto;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-weak);
+}
+
+.gptlive-handoff-reply {
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.gptlive-handoff-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--border-weak-base, rgba(127, 127, 127, 0.35));
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.gptlive-handoff-badge[data-channel="speakable"] {
+  color: var(--icon-success-base, green);
+}
+
+.gptlive-dot[data-phase="listening"] {
+  background: var(--icon-warning-base, orange);
+  opacity: 1;
+}
+
+.gptlive-note[data-wake="error"] {
+  color: var(--text-critical-base, var(--text-weak));
+}
+
+.gptlive-body {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  border-top: 1px solid var(--border-weak-base, rgba(127, 127, 127, 0.2));
+}
+
+.gptlive-body > .gptlive-entries {
+  flex: 1;
+  min-width: 0;
+  border-top: 0;
+}
+
+.gptlive-agent {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 4px 0 0 10px;
+  border-left: 1px solid var(--border-weak-base, rgba(127, 127, 127, 0.2));
+}
+
+.gptlive-agent[data-open] {
+  flex: 1;
+}
+
+.gptlive-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gptlive-agent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Collapsed: a thin rail with the title running down it. */
+.gptlive-agent:not([data-open]) {
+  padding-left: 6px;
+}
+
+.gptlive-agent:not([data-open]) .gptlive-agent-toggle {
+  flex-direction: column;
+  writing-mode: vertical-rl;
+}
+
+.gptlive-agent:not([data-open]) .gptlive-agent-chevron {
+  writing-mode: horizontal-tb;
+}
+
+.gptlive-agent-chevron {
+  width: 10px;
+  color: var(--text-weak);
+}
+
+.gptlive-agent-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }

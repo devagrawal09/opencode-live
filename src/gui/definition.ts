@@ -1,6 +1,27 @@
-import { Plugin } from "@opencode/plugin/gui"
+import { Plugin, Store } from "@opencode/plugin/gui"
+import { Schema } from "effect"
+
+import { PACES } from "../shared/rpc"
 
 export const definition = Plugin.define({
+  stores: {
+    /**
+     * Window preferences; the debug view of GPT-Live events is off unless turned on. `voice` and `pace` are the
+     * choices from the settings page; unset, the plugin options decide. `wakeWord` is whether a window listens for
+     * the wake word; off unless turned on.
+     */
+    prefs: Store.global(
+      Schema.Struct({
+        debugEvents: Schema.Boolean,
+        voice: Schema.optional(Schema.String),
+        pace: Schema.optional(Schema.Literals(PACES)),
+        wakeWord: Schema.optional(Schema.Boolean),
+        /** Whether the voice agent section under the transcript is expanded (default open). */
+        voiceAgentOpen: Schema.optional(Schema.Boolean),
+      }),
+      { debugEvents: false },
+    ),
+  },
   i18n: {
     en: {
       title: "GPT-Live",
@@ -11,6 +32,7 @@ export const definition = Plugin.define({
       "command.unmute": "Unmute voice call",
       "command.new": "New voice conversation",
       "command.panel": "Show voice call panel",
+      "command.pick": "Choose voice and speaking pace",
       "command.group": "Voice",
       "menu.panel": "Voice call",
       "state.idle": "No call",
@@ -19,6 +41,17 @@ export const definition = Plugin.define({
       "state.muted": "Muted",
       "state.closing": "Ending…",
       "state.error": "Call failed",
+      "state.listening": "Listening for “{{phrase}}”",
+      "state.wake.loading": "Loading the wake word…",
+      "pill.listening": "Listening",
+      "command.wake.start": "Start listening for wake word",
+      "command.wake.stop": "Stop listening for wake word",
+      "wake.start": "Listen for “{{phrase}}”",
+      "wake.stop": "Stop listening",
+      "wake.note":
+        "The microphone is on (macOS shows its orange dot), listening on this Mac only. Nothing is sent to OpenAI until you say “{{phrase}}”; then a call starts and hangs up after {{seconds}} seconds of quiet.",
+      "wake.paused": "Wake word paused during the call.",
+      "wake.other": "Another window is listening for the wake word.",
       start: "Start call",
       end: "End call",
       mute: "Mute",
@@ -41,6 +74,51 @@ export const definition = Plugin.define({
       "task.done": "Done",
       "task.failed": "Failed",
       "task.cancelled": "Cancelled",
+      "command.events.show": "Show GPT-Live events",
+      "command.events.hide": "Hide GPT-Live events",
+      "events.title": "GPT-Live events",
+      "events.hide": "Hide",
+      "events.empty": "Events from the call show up here while it runs.",
+      "voice.title": "Voice agent",
+      "voice.open": "Open voice session",
+      "voice.empty":
+        "When GPT-Live hands something to the voice agent, its requests, tool calls, replies and timing show up here.",
+      "voice.unknown": "(request not seen)",
+      "voice.total": "{{time}} total",
+      "voice.details": "Details",
+      "voice.context": "Context: {{turns}} turns, {{updates}} updates, {{chars}} chars",
+      "voice.context.first": "first hand-off of the call",
+      "voice.tools": "Tools",
+      "voice.tool.running": "running",
+      "voice.reply": "Reply",
+      "voice.reply.none": "Nothing went back to GPT-Live.",
+      "voice.usage": "{{input}} in · {{output}} out",
+      "voice.time.queued": "queued",
+      "voice.time.delivered": "delivered",
+      "voice.time.started": "started",
+      "voice.time.firstToken": "1st token",
+      "voice.time.replied": "reply",
+      "voice.time.spoken": "spoken",
+      "voice.channel.speakable": "spoken",
+      "voice.channel.commentary": "commentary",
+      "voice.channel.none": "none",
+      "voice.phase.waiting": "Waiting",
+      "voice.phase.running": "Working",
+      "voice.phase.succeeded": "Answered",
+      "voice.phase.failed": "Failed",
+      "voice.phase.interrupted": "Interrupted",
+      "settings.title": "GPT-Live",
+      "settings.description": "How GPT-Live sounds in voice calls from this app.",
+      "settings.section": "Voice call",
+      "settings.voice": "Voice",
+      "settings.voice.description": "GPT-Live's voice. Applies to your next call.",
+      "settings.pace": "Speaking pace",
+      "settings.pace.description":
+        "A hint added to GPT-Live's instructions, not an exact speed setting. Applies to your next call.",
+      "settings.pace.normal": "Normal",
+      "settings.pace.slower": "Slower",
+      "settings.pace.faster": "Faster",
+      "settings.active": "A call is up. Changes apply to your next call; this one keeps its voice and pace.",
     },
   },
 })

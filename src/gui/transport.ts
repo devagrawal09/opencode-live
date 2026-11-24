@@ -30,6 +30,8 @@ export interface AudioCallbacks {
   dropped(message: string): void
   /** Something the user should know that does not end the call. */
   warning(message: string): void
+  /** An event GPT-Live sent on the data channel, parsed. */
+  event?(event: Record<string, unknown> & { type: string }): void
 }
 
 export class WindowAudio {
@@ -53,33 +55,49 @@ export class WindowAudio {
     // A media element pulls the remote track in Chromium; a Web Audio-only sink can stay silent.
     this.speaker.autoplay = true
     this.channel = this.peer.createDataChannel("oai-events", { ordered: true })
-    // GPT-Live sends its events here too; the server plugin reads them from the control channel instead.
+    // GPT-Live sends its events here too; the server plugin acts on the control channel's, these are only traced.
     this.channel.addEventListener("close", this.onChannelClose)
+    this.channel.addEventListener("message", this.onChannelMessage)
     this.peer.addEventListener("track", this.onTrack)
     this.peer.addEventListener("connectionstatechange", this.onPeerState)
   }
 
   private readonly onChannelClose = () => this.drop("The call's event channel closed")
+
+  private readonly onChannelMessage = (message: MessageEvent) => {
+    if (typeof message.data !== "string" || !this.callbacks.event) return
+    try {
+      const event = JSON.parse(message.data) as Record<string, unknown>
+      if (typeof event.type === "string") this.callbacks.event(event as Record<string, unknown> & { type: string })
+    } catch {}
+  }
   private readonly onTrack = (event: RTCTrackEvent) => this.play(event.track)
   private readonly onPeerState = () => {
     const state = this.peer.connectionState
     if (state === "failed" || state === "closed") this.drop(`Audio connection ${state}`)
   }
 
-  /** Opens the microphone and returns the SDP offer with every ICE candidate in it. */
-  async offer(): Promise<string> {
+  /**
+   * Opens the microphone and returns the SDP offer with every ICE candidate in it. With `shared`, an open microphone
+   * stream (the wake word listener's), the call sends a clone of its track instead: muting and closing the call
+   * then never touch the shared stream, and the microphone is not opened twice.
+   */
+  async offer(shared?: MediaStream): Promise<string> {
     await this.context.resume().catch(() => undefined)
-    const stream = await navigator.mediaDevices
-      .getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      })
-      .catch((cause: unknown) => {
-        throw new AudioError(
-          "microphone",
-          `Could not open the microphone${cause instanceof Error && cause.message ? `: ${cause.message}` : ""}.`,
-        )
-      })
+    const sharedTrack = shared?.getAudioTracks().find((track) => track.readyState === "live")
+    const stream = sharedTrack
+      ? new MediaStream([sharedTrack.clone()])
+      : await navigator.mediaDevices
+          .getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: false,
+          })
+          .catch((cause: unknown) => {
+            throw new AudioError(
+              "microphone",
+              `Could not open the microphone${cause instanceof Error && cause.message ? `: ${cause.message}` : ""}.`,
+            )
+          })
     if (this.closed) {
       stream.getTracks().forEach((track) => track.stop())
       throw new AudioError("connection", "The call was closed")
@@ -119,6 +137,7 @@ export class WindowAudio {
     this.closed = true
     clearInterval(this.meter)
     this.channel.removeEventListener("close", this.onChannelClose)
+    this.channel.removeEventListener("message", this.onChannelMessage)
     this.peer.removeEventListener("track", this.onTrack)
     this.peer.removeEventListener("connectionstatechange", this.onPeerState)
     this.stream?.getTracks().forEach((track) => track.stop())

@@ -85,6 +85,10 @@ flowchart LR
 - **Takeover.** Starting a call while another is active ends the old one instead of refusing.
 - **Lost event stream.** Task outcomes arrive on OpenCode's event stream. If it ends or fails, open tasks are reported
   once as lost, new tasks are refused, and the call hangs up a few seconds later, once GPT-Live has said so.
+- **Not talking over the user.** Answers, task outcomes and permission prompts wait while the user or GPT-Live is
+  talking (`src/server/floor.ts`: turn starts, transcripts and output audio), then go out as one append, permission
+  prompts first. Typed messages are never held. `held`, `flushed`, `superseded` and `dropped` lines in the call log
+  show the waits.
 - **Continuity.** Plugin storage keeps `link/<mainSessionID>` (the voice session and call count) and
   `turns/<voiceSessionID>` (the last turns, replayed as background at the next call). `/voice-new` starts a fresh
   voice session.
@@ -95,18 +99,50 @@ flowchart LR
 `dist/gui-experimental.cjs`. It replaces both the terminal plugin and the native helper and talks to the same server
 plugin over the `GptLive` RPC, on the server of the session the call is about.
 
-| Path                   | What lives there                                                                        |
-| ---------------------- | --------------------------------------------------------------------------------------- |
-| `src/gui/window.tsx`   | Window setup: commands, the voice call panel, the composer pill.                        |
-| `src/gui/call.ts`      | The window's call state, RPC calls and events, heartbeats; the desktop `controller.ts`. |
-| `src/gui/transport.ts` | WebRTC in the window: microphone, peer, `oai-events` data channel, speaker, levels.     |
-| `src/gui/main.ts`      | Electron main: macOS microphone access, background throttling, hanging up on close.     |
-| `src/gui/contract.ts`  | The `Ipc` between a window and main.                                                    |
+| Path                     | What lives there                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| `src/gui/window.tsx`     | Window setup: commands, the voice call panel, the composer pill, the settings page.     |
+| `src/gui/call.ts`        | The window's call state, RPC calls and events, heartbeats; the desktop `controller.ts`. |
+| `src/gui/handoffs.ts`    | The voice-agent tab's model: each hand-off's steps, tools, reply and timing.            |
+| `src/gui/transport.ts`   | WebRTC in the window: microphone, peer, `oai-events` data channel, speaker, levels.     |
+| `src/gui/wake.ts`        | The wake word listener: the always-on microphone, the model, pausing during calls.      |
+| `src/gui/wake-assets.ts` | The wake word's model and ONNX Runtime WebAssembly: pinned, downloaded, cached.         |
+| `src/gui/idle.ts`        | When a call started from the wake word has gone quiet.                                  |
+| `src/gui/main.ts`        | Electron main: microphone access, background throttling, hanging up on close, wake.     |
+| `src/gui/contract.ts`    | The `Ipc` between a window and main.                                                    |
 
 The window negotiates what the helper does (one Opus send/receive track, the `oai-events` channel, every ICE candidate
 in the offer), opening the microphone first so the offer carries real host candidates. While a call is up, main turns
 off the window's background throttling so heartbeats keep their 5-second rhythm, and, for calls on the app's own
 server, it ends the call as soon as its window closes rather than when the heartbeats stop.
+
+### Wake word
+
+With the wake word on (a global preference), main lets one window listen at a time (`Host` state `free`, `mine` or
+`other`; turning it on in a window takes it over) and keeps that window unthrottled. The window opens the microphone
+with echo cancellation, noise suppression and gain control and feeds it to LiveKit WakeWord's `WakeWordListener`
+(an AudioWorklet, 16 kHz, one model step per 80 ms) on onnxruntime-web, single-threaded, in the window. Nothing is sent
+anywhere before a detection.
+
+The bundle cannot carry the model or the WebAssembly: it is one CommonJS file evaluated from a string, and inlining
+them would add about 30 MB of base64. Main downloads both once (`wake-assets.ts`: the GitHub release model and the
+jsDelivr WebAssembly of the exact onnxruntime-web version the bundle is built with, each checked against a pinned
+SHA-256) into the app's data folder and hands them to the window as base64 over the `Ipc`. The window passes the bytes
+to `env.wasm.wasmBinary` and `loadModel`, so ONNX Runtime fetches nothing. `vite.config.ts` replaces ONNX Runtime's
+`import.meta.url` with a constant so the build does not inline the WebAssembly, and fails if it does.
+
+On a detection the listener stops, a chime plays, and the call starts with `wake: true` on the current session, unless
+the server already has a call up (another window's). The call sends a clone of the listening microphone track, so
+the microphone is not opened twice and muting or ending the call leaves the listener's stream alone. The server adds a
+sentence to GPT-Live's instructions: the call began from the wake word, so no greeting. While live, `IdleClock` hangs
+the call up after 20 seconds without transcripts, hand-off steps or task updates, with GPT-Live silent, nothing queued
+and nothing working. After any call ends, listening resumes if the wake word is still on.
+
+The call panel has a collapsible **Voice agent** column beside the transcript. The bridge reports each hand-off's steps as RPC
+`handoff` events (`received`, `queued`, `delivered`, `started`, `first-token`, `tool`, `replied`, an approximate
+`spoken`), timed with OpenCode's event times, and mirrors them to the call log as `voice-step` lines. Only the request,
+the sizes of its context, clipped tool input and output, and the reply leave the bridge: never prompts, history or
+reasoning.
 
 ## The native helper
 
