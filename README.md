@@ -1,301 +1,213 @@
-<p align="center">
-  <img src="assets/banner.svg" alt="opencode-gpt-live: talk to OpenCode out loud" width="100%">
-</p>
+# opencode-live
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/opencode-gpt-live"><img alt="npm" src="https://img.shields.io/npm/v/opencode-gpt-live?color=8b5cf6&label=npm"></a>
-  <a href="https://github.com/malhashemi/opencode-gpt-live/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/malhashemi/opencode-gpt-live/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
-  <img alt="OpenCode 2.0.20 or newer" src="https://img.shields.io/badge/OpenCode-%E2%89%A5%202.0.20-4ade80">
-  <img alt="macOS, Linux, Windows" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-64748b">
-</p>
+**Talk to OpenCode Desktop out loud.** Real-time voice calls with your OpenCode session, on your ChatGPT subscription.
+You talk; GPT-Live, OpenAI's real-time voice model, answers as you speak, hands the real work to the session on your
+screen, and tells you how it went.
 
-<p align="center">
-  <b>Real-time voice calls with your OpenCode session, on your ChatGPT subscription.</b><br>
-  Say what you want. GPT-Live answers instantly, your session does the work, and you hear how it went.
-</p>
+> Based on [opencode-gpt-live](https://github.com/malhashemi/opencode-gpt-live) by
+> [M. Adel Alhashemi](https://github.com/malhashemi), which built the GPT-Live connection, the ChatGPT sign-in and the
+> voice agent that drives your session. This fork is **OpenCode Desktop only**: the call runs in the app window, and it
+> adds a desktop call panel, a voice agent view, better call context, waiting for you to finish talking, voice settings
+> and an on-device wake word. For the terminal (TUI), use the original.
 
-<p align="center">
-  <a href="#install">Install</a> ·
-  <a href="#usage">Usage</a> ·
-  <a href="#configuration">Configuration</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+[![CI](https://github.com/devagrawal09/opencode-live/actions/workflows/ci.yml/badge.svg)](https://github.com/devagrawal09/opencode-live/actions/workflows/ci.yml)
+[![MIT license](https://img.shields.io/badge/license-MIT-22d3ee)](LICENSE)
+![OpenCode Desktop 2.3 or newer](https://img.shields.io/badge/OpenCode%20Desktop-%E2%89%A5%202.3-4ade80)
+![macOS](https://img.shields.io/badge/tested%20on-macOS-64748b)
+
+[Install](#install) · [Usage](#usage) · [Configuration](#configuration) · [How it works](#how-it-works) ·
+[Privacy](#privacy) · [Troubleshooting](#troubleshooting)
 
 ---
 
-Run `/voice` and OpenCode picks up. You talk; GPT-Live, OpenAI's real-time voice model, listens and replies as you
-speak. Every request goes to the OpenCode session on your screen, where your usual agent reads, edits and runs things
-while you keep talking. When the work finishes, you hear the result. You can keep typing in the same session
-throughout the call.
+## What you get
 
-<table>
-  <tr>
-    <td width="42%" align="center">
-      <img src="assets/aura.webp" alt="The voice aura: a glowing ring that swells with the voice, cyan while you speak and violet while GPT-Live speaks" width="300"><br>
-      <sub>The aura, rendered by the plugin: at rest, then you (cyan), then GPT-Live (violet).</sub>
-    </td>
-    <td>
-      <ul>
-        <li><b>Talk while it works.</b> Requests queue into your session. Ask "how's it going?", redirect it mid-task, or say "stop that".</li>
-        <li><b>Approve by voice.</b> When the session asks for permission, GPT-Live reads the request out and answers with your decision.</li>
-        <li><b>Picks up where you left off.</b> Each session keeps one voice conversation, so the next call remembers the last one.</li>
-        <li><b>Hang up by voice.</b> Say "end the call", or press a key.</li>
-        <li><b>Hands-free audio.</b> Echo cancellation and noise suppression run locally, and other apps' audio is turned down during calls.</li>
-        <li><b>No API key.</b> It uses the ChatGPT sign-in you already have in OpenCode.</li>
-      </ul>
-    </td>
-  </tr>
-</table>
+- **Talk while it works.** Requests go to your session as tasks. Ask "how's it going?", change direction mid-task, or
+  say "stop that". Approve permission prompts by voice.
+- **It knows the context.** Each call starts with your session's recent history and your earlier voice calls, so "what
+  were we just doing?" gets an answer straight away.
+- **It waits for you.** Results that arrive while you (or GPT-Live) are talking are held and spoken once you're done,
+  permission prompts first.
+- **See everything.** The call panel shows the transcript and, side by side, what the voice agent did for each request:
+  tools, reply and timings. An optional debug view lists GPT-Live's raw events.
+- **Pick a voice.** 26 voices and a speaking-pace hint, from the panel or **Settings › GPT-Live**.
+- **"Hey Jarvis" (experimental).** An on-device wake word starts a call hands-free; nothing is sent until you say it.
+- **No API key.** It uses the ChatGPT sign-in you already have in OpenCode.
 
 ## Requirements
 
-- [OpenCode](https://opencode.ai) 2.0.20 or newer.
-- A ChatGPT account signed in to OpenCode: run `/connect`, choose OpenAI, then "ChatGPT Pro/Plus". Voice availability
-  and usage limits depend on your ChatGPT plan.
-- A microphone and speakers (or headphones).
-- **Linux:** ALSA (`libasound2`), which PipeWire and PulseAudio systems already provide. Turning down other apps during
-  calls uses `pactl`.
+- [OpenCode Desktop](https://opencode.ai) 2.3 or newer. Tested on macOS (Apple silicon).
+- A **ChatGPT Plus or Pro** plan, connected in OpenCode with **`/connect` › OpenAI › "Codex browser (legacy)"**.
+  - ChatGPT Go doesn't include voice through Codex: calls fail with a 404.
+  - The newer "Sign in with ChatGPT" login only covers text requests and hides the account ID GPT-Live needs.
+- A microphone and speakers (headphones work best).
+- [Bun](https://bun.sh) to build the plugin.
 
 ## Install
 
-Add the plugin to your OpenCode config (`~/.config/opencode/opencode.json` for every project, or `opencode.json` in one
-project):
+The plugin isn't on npm. Build it from a clone:
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-gpt-live"]
-}
+```sh
+git clone https://github.com/devagrawal09/opencode-live
+cd opencode-live
+bun install
+bun run build:gui
 ```
 
-Restart OpenCode. The audio helper for your platform comes with the plugin as a prebuilt package. If it is missing, the
-plugin downloads it from the matching [GitHub release](https://github.com/malhashemi/opencode-gpt-live/releases) and
-checks it against the release's SHA-256 checksums before running it.
-
-On macOS, the first call asks for microphone access for your terminal app.
-
-## Usage
-
-1. Run `/voice`, or press <kbd>ctrl</kbd>+<kbd>x</kbd> <kbd>v</kbd>. Without a session open, the call starts in a new
-   one.
-2. Talk. For example:
-   - "What does this project do?"
-   - "Add a dark mode toggle to the settings page, then run the tests."
-   - "How's it going?" · "Actually, use the existing theme hook instead." · "Stop that."
-3. Hang up by saying "end the call", running `/voice` again, or pressing <kbd>ctrl</kbd>+<kbd>x</kbd> <kbd>v</kbd>.
-
-While a call is on, the strip above the prompt shows who is talking, what OpenCode is doing and the call keys. The
-transcript panel on the right shows the conversation and every task sent to your session, with the aura on top. It
-opens with the call and closes when the call ends.
-
-### Commands and keys
-
-| Command        | Key                                       | What it does                                 |
-| -------------- | ----------------------------------------- | -------------------------------------------- |
-| `/voice`       | <kbd>ctrl</kbd>+<kbd>x</kbd> <kbd>v</kbd> | Start or end a call                          |
-| `/voice-mute`  | <kbd>ctrl</kbd>+<kbd>y</kbd>              | Mute or unmute your microphone               |
-| `/voice-panel` | <kbd>ctrl</kbd>+<kbd>s</kbd>              | Show or hide the transcript panel            |
-| `/voice-stop`  |                                           | End the call (alias `/hangup`)               |
-| `/voice-new`   |                                           | Start a call with a fresh voice conversation |
-| `/voice-pick`  |                                           | Choose GPT-Live's voice                      |
-
-Every command is also in the <kbd>ctrl</kbd>+<kbd>p</kbd> palette. Keys can be changed; see
-[Configuration](#configuration).
-
-### Terminal support
-
-The aura picks the best way your terminal can draw it:
-
-| Terminal                                                     | Aura                                    |
-| ------------------------------------------------------------ | --------------------------------------- |
-| Kitty graphics protocol (Ghostty, kitty)                     | Anti-aliased image, 30 frames/second    |
-| [herdr](https://github.com/herdrdev/herdr)                   | Image through herdr's pane graphics API |
-| Anything else (tmux, iTerm2, Terminal.app, Windows Terminal) | Half-block characters in true color     |
-
-Voice, commands and the transcript work the same everywhere.
-
-### OpenCode Desktop
-
-The plugin also has an experimental desktop part (`./gui-experimental`). OpenCode Desktop loads it for plugins listed in
-the global `opencode.json(c)`. In a desktop window the call runs in the window itself, with Chromium's WebRTC, echo
-cancellation and noise suppression, so the native helper is not used; the first call asks macOS for microphone access
-for OpenCode.
-
-| Desktop                    | Action                                                                 |
-| -------------------------- | ---------------------------------------------------------------------- |
-| `/voice`, `Cmd/Ctrl+Alt+V` | Start a call on the current session, or end it                         |
-| `Cmd/Ctrl+Alt+M`           | Mute or unmute                                                         |
-| `/voice-new`               | Start a call in a new voice conversation                               |
-| `/voice-pick`              | Open **Settings › GPT-Live** to choose the voice and speaking pace     |
-| Voice call panel           | Call state, levels, live transcript and tasks (side panel **+** menu)  |
-| Composer pill              | Live or muted state above the composer; mute, show the panel, end call |
-
-The settings page's voice and pace override the `voice` and `pace` options in desktop windows and apply to the next
-call; a call that is up keeps its voice.
-
-From a local checkout, build the bundle first with `bun run build:gui` (or `bun run dev:gui` to rebuild on changes).
-
-#### Wake word (experimental)
-
-Run **Start listening for wake word** from the command palette (or **Listen for "Hey Jarvis"** in the voice call
-panel), then say "Hey Jarvis" to start a call hands-free: a short chime plays, the call connects, and you say what you
-want. GPT-Live skips its greeting. A call started this way hangs up by itself after 20 seconds with no talking, no
-queued tasks and nothing working, and the window goes back to listening. The setting is remembered; run **Stop
-listening for wake word** to turn it off.
-
-- **Privacy.** Detection runs on your Mac, in the window, with [LiveKit WakeWord](https://github.com/livekit/livekit-wakeword)'s
-  "hey jarvis" model (Apache-2.0) on ONNX Runtime. Nothing is sent to OpenAI, or anywhere else, until the wake word is
-  heard; only then does a call start. The first time, the app downloads the model (7 MB, from LiveKit's GitHub release)
-  and ONNX Runtime's WebAssembly (15 MB, from jsDelivr), checks both against pinned SHA-256 digests, and caches them in
-  its data folder.
-- **The microphone stays on** while listening, so macOS shows its orange microphone dot the whole time.
-- **A window must stay open.** One window listens at a time (the one you turned it on in, or another if it closes); it
-  keeps listening in the background, but not once every window is closed. The call uses that window's current session.
-- **False wakes happen** (LiveKit measures 0.5 to 2.5 an hour on conversational speech): they start a short call that
-  hangs up after 20 seconds of quiet. A wake word heard while another window has a call up is ignored.
-
-## Configuration
-
-Pass options with the object form of the plugin entry. Every option is optional.
+Add it to `~/.config/opencode/opencode.json` (OpenCode Desktop reads plugins only from the global config):
 
 ```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    {
-      "package": "opencode-gpt-live",
-      "options": {
-        "voice": "juniper",
-        "duck": true,
-        "keybinds": { "toggle": "<leader>v", "mute": ["ctrl+y", "f9"], "panel": "ctrl+s" },
-      },
-    },
+    { "package": "/path/to/opencode-live", "options": { "voiceModel": "openai/gpt-6-luna", "voiceVariant": "low" } },
   ],
 }
 ```
 
-| Option                   | Default                                                    | Description                                                                                                          |
-| ------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `voice`                  | `"cove"`                                                   | GPT-Live's voice. See [Voices](#voices).                                                                             |
-| `pace`                   | `"normal"`                                                 | Speaking-pace hint: `normal`, `slower` or `faster`. Adds one sentence to GPT-Live's prompt; not an exact speed.      |
-| `keybinds`               | `{ toggle: "<leader>v", mute: "ctrl+y", panel: "ctrl+s" }` | Keys for `toggle`, `mute`, `panel`, `stop`, `new` and `voice`. A key, a list of keys, or `false`.                    |
-| `panel`                  | `true`                                                     | Open the transcript panel when a call starts.                                                                        |
-| `duck`                   | `true`                                                     | Turn other apps' audio down during calls and restore it afterwards.                                                  |
-| `instructions`           |                                                            | Extra instructions appended to GPT-Live's prompt, such as a preferred language or tone.                              |
-| `voiceAgentInstructions` |                                                            | Extra instructions appended to the voice agent's prompt.                                                             |
-| `prompts`                |                                                            | Replace a built-in prompt: `{ "gptLive": "<path>", "voiceAgent": "<path>" }`. See [Custom prompts](#custom-prompts). |
-| `voiceModel`             | `"openai/gpt-6.1-sol"`                                     | Model for the background agent that thinks for GPT-Live, as `provider/model`.                                        |
-| `voiceVariant`           | `"medium"`                                                 | Thinking level for that model.                                                                                       |
-| `log`                    | `true`                                                     | Keep a local log of each call (see [Privacy](#privacy)).                                                             |
-| `visual`                 | automatic                                                  | Force the aura's drawing method: `kitty`, `herdr` or `blocks`.                                                       |
+Restart OpenCode Desktop. The first call asks macOS for microphone access for OpenCode.
+
+## Usage
+
+1. Open a session and run `/voice`, or press <kbd>⌘</kbd><kbd>⌥</kbd><kbd>V</kbd>.
+2. Talk. For example: "What does this project do?" · "Add a dark mode toggle, then run the tests." · "How's it going?" ·
+   "Actually, use the existing theme hook." · "Stop that."
+3. Hang up by saying "end the call", or with `/voice` / <kbd>⌘</kbd><kbd>⌥</kbd><kbd>V</kbd> again.
+
+| Command                       | Key                                  | What it does                                            |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------- |
+| `/voice`                      | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>V</kbd> | Start or end a call on the current session              |
+| Mute voice call               | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>M</kbd> | Mute or unmute your microphone                          |
+| `/voice-new`                  |                                      | Start a call in a fresh voice conversation              |
+| `/voice-pick`                 |                                      | Open **Settings › GPT-Live**: voice and speaking pace   |
+| Show voice call panel         |                                      | The call panel (also in the side panel's **+** menu)    |
+| Show GPT-Live events          |                                      | Toggle the debug view of GPT-Live's events in the panel |
+| Start listening for wake word |                                      | Toggle the "Hey Jarvis" wake word                       |
+
+Every command is in the command palette (<kbd>⌘</kbd><kbd>P</kbd>). Change the keys in **Settings › Shortcuts**.
+
+**The call panel** has the call controls, mic and speaker levels and, when no call is up, the voice and pace pickers.
+Below them, the transcript and the **Voice agent** column sit side by side; collapse the column to a thin rail with its
+header. Earlier calls stay in the transcript, under a divider. A pill above the composer shows the call state.
+
+### Wake word (experimental)
+
+Run **Start listening for wake word**, then say "Hey Jarvis": a chime plays, a call connects (GPT-Live skips its
+greeting), and you say what you want. Wait for the chime: words said in the same breath as the wake word aren't
+captured. A wake-word call hangs up after about 20 seconds with no talking, no queued tasks and nothing working, and
+listening resumes.
+
+- Detection runs in the app window with [LiveKit WakeWord](https://github.com/livekit/livekit-wakeword)'s "hey jarvis"
+  model on ONNX Runtime. The first time, the app downloads the model (7 MB, LiveKit's GitHub release) and ONNX Runtime's
+  WebAssembly (15 MB, jsDelivr), checks both against pinned SHA-256 digests, and caches them.
+- The microphone stays open while listening, so macOS shows its orange dot. One window listens at a time, and it has to
+  stay open (minimised is fine).
+- False wakes happen (about 0.5 to 2.5 an hour on conversational speech): they start a short call that hangs up on its
+  own.
+
+## Configuration
+
+Options go in the plugin entry's `options`. All are optional.
+
+| Option                   | Default                | Description                                                                                             |
+| ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `voice`                  | `"cove"`               | GPT-Live's voice. The panel and **Settings › GPT-Live** override it. See [Voices](#voices).             |
+| `pace`                   | `"normal"`             | Speaking-pace hint: `normal`, `slower` or `faster`. One sentence in GPT-Live's prompt, not a speed.     |
+| `voiceModel`             | `"openai/gpt-6.1-sol"` | Model for the voice agent, as `provider/model`. A fast model (e.g. `openai/gpt-6-luna`) feels snappier. |
+| `voiceVariant`           | `"medium"`             | Thinking level for that model.                                                                          |
+| `instructions`           |                        | Extra instructions for GPT-Live, such as a language or tone.                                            |
+| `voiceAgentInstructions` |                        | Extra instructions for the voice agent.                                                                 |
+| `prompts`                |                        | Replace a built-in prompt: `{ "gptLive": "<path>", "voiceAgent": "<path>" }`. See below.                |
+| `log`                    | `true`                 | Keep a local log of each call (see [Privacy](#privacy)).                                                |
+
+Use a voice-agent model from a provider that runs OpenCode's own tool loop, such as `openai/*`. Providers that drive
+their own agent (such as `claude-agent/*`) may not get the voice agent's prompt or tools.
 
 ### Voices
 
 `cove`, `juniper`, `maple`, `spruce`, `ember`, `vale`, `breeze`, `arbor`, `sol`, `marin`, `aube`, `bubbie`, `haetsal`,
 `hanul`, `himari`, `leher`, `miko`, `neer`, `porto`, `rindo`, `rio`, `rivage`, `selva`, `sonna`, `tinta` and `viola`.
-A voice is set when a call starts and cannot change during it. GPT-Live has no speed setting, so `pace` is a hint in its
-instructions, also read when a call starts.
+A call's voice and pace are set when it starts; changes apply to the next call.
 
 ### Custom prompts
 
-A call uses two system prompts: one for GPT-Live, which does the talking, and one for the voice agent, which thinks and
-acts for it. Both live as folders of Markdown sections in [`src/server/prompts/`](src/server/prompts). To change one,
-copy its folder (or write a single Markdown file), edit it, and point the plugin at it:
+A call uses two prompts, both folders of Markdown sections in [`src/server/prompts/`](src/server/prompts): one for
+GPT-Live, which talks, and one for the voice agent, which acts for it. Copy one, edit it, and point the plugin at it:
 
 ```jsonc
 {
-  "plugins": [
-    {
-      "package": "opencode-gpt-live",
-      "options": {
-        "prompts": { "gptLive": "~/.config/opencode/voice/gpt-live", "voiceAgent": ".opencode/voice-agent.md" },
-      },
-    },
-  ],
+  "options": {
+    "prompts": { "gptLive": "~/.config/opencode/voice/gpt-live", "voiceAgent": ".opencode/voice-agent.md" },
+  },
 }
 ```
 
-Relative paths resolve against the project and `~` expands to your home directory. `{{project}}` and `{{directory}}`
-are filled in, and HTML comments are dropped. Prompts are read at the start of every call, so edits apply to the next
-call. If a custom prompt can't be read, the call uses the built-in one and says so in the transcript.
+Relative paths resolve against the project and `~` expands. `{{project}}` and `{{directory}}` are filled in. Prompts are
+read at the start of each call.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  you((You)) <-->|microphone, speaker| host["gpt-live-host<br/>Rust: WebRTC, echo cancellation, Opus"]
-  host <-->|WebRTC audio| live["GPT-Live<br/>OpenAI real-time voice"]
-  tui["Terminal plugin<br/>aura, transcript, keys"] <-->|stdio JSON| host
-  tui <-->|RPC| server["Server plugin<br/>ChatGPT sign-in, call setup"]
+  you((You)) <-->|mic, speaker| window["Desktop window<br/>WebRTC, echo cancellation"]
+  window <-->|audio| live["GPT-Live<br/>OpenAI real-time voice"]
+  window <-->|RPC| server["Server plugin<br/>ChatGPT sign-in, call setup"]
   server <-->|control WebSocket| live
-  server -->|hand-off| voice["Voice session<br/>thinks for GPT-Live"]
+  server -->|hand-off| voice["Voice agent session<br/>thinks for GPT-Live"]
   voice -->|queue, steer, stop, permissions| main["Your OpenCode session<br/>does the work"]
   main -.->|progress, results| voice
 ```
 
-- **gpt-live-host** is a small native program that owns the audio: WebRTC to OpenAI, the microphone and speaker,
-  echo cancellation, noise suppression and Opus encoding. The plugin talks to it over newline-delimited JSON on stdio.
-- **The server plugin** holds your ChatGPT credentials, creates the call, joins its control channel and bridges GPT-Live
-  to OpenCode. The native helper never sees your credentials.
-- **The voice session** is a separate OpenCode session per coding session. When GPT-Live needs to act or look something
-  up, it hands off to this session's agent, which can only talk to your main session: queue or steer work, check on it,
-  read what it did, stop it and answer its permission prompts. It cannot read files or run commands itself.
-- **Your main session** does the actual work, exactly as if you had typed the request.
+- **The desktop window** owns the audio: microphone, speaker and the WebRTC connection to OpenAI, with Chromium's echo
+  cancellation and noise suppression. It never sees your credentials.
+- **The server plugin** holds your ChatGPT credentials, creates the call with its context, joins its control channel
+  and bridges GPT-Live to OpenCode. It holds spoken results while someone is talking.
+- **The voice agent** is a separate OpenCode session per coding session. GPT-Live hands it anything that needs thinking
+  or acting. It can only talk to your main session (queue or steer work, check on it, read what it did, stop it, answer
+  its permission prompts); it can't read files or run commands.
+- **Your main session** does the actual work, as if you had typed the request.
 
-The [architecture guide](docs/architecture.md) covers each part in detail.
+The [architecture guide](docs/architecture.md) has the details.
 
 ## Privacy
 
-- Audio travels directly between your computer and OpenAI over an encrypted WebRTC connection, under your ChatGPT
-  account and OpenAI's terms.
-- Your ChatGPT credentials stay in OpenCode; the plugin reads them from OpenCode's ChatGPT sign-in.
+- Audio goes directly between your computer and OpenAI over encrypted WebRTC, under your ChatGPT account and OpenAI's
+  terms.
+- Your ChatGPT credentials stay in OpenCode; the plugin reads them from OpenCode's sign-in.
 - Each call writes a local log of transcripts and events to `~/.local/state/opencode-gpt-live/calls/`
-  (`$XDG_STATE_HOME` if set, `%LOCALAPPDATA%` on Windows). Set `"log": false` to turn it off.
+  (`$XDG_STATE_HOME` if set). Set `"log": false` to turn it off.
 - The voice conversation is an ordinary OpenCode session, stored like any other.
-- With the desktop wake word on, the microphone is open and listened to on your Mac only; nothing leaves it until you
-  say the wake word. See [Wake word](#wake-word-experimental).
+- With the wake word on, the microphone is open and listened to on your Mac only; nothing leaves it until you say the
+  wake word.
 
 ## Troubleshooting
 
-| Symptom                                              | Fix                                                                                             |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| "GPT-Live needs your ChatGPT subscription", or a 401 | Run `/connect`, choose OpenAI, then "ChatGPT Pro/Plus".                                         |
-| 403 error when the call starts                       | Your ChatGPT plan may not include voice, or the voice allowance is used up.                     |
-| GPT-Live can't hear you (macOS)                      | Allow microphone access for your terminal in System Settings → Privacy & Security → Microphone. |
-| No audio on Linux                                    | Install `libasound2` (Debian/Ubuntu) or `alsa-lib` (Fedora, Arch).                              |
-| The aura looks blocky                                | Your terminal has no image support; the half-block version is the fallback.                     |
+| Symptom                                              | Fix                                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| "GPT-Live needs your ChatGPT subscription", or a 401 | `/connect` › OpenAI › "Codex browser (legacy)".                                      |
+| "…sign-in has no account ID"                         | You're on the "Sign in with ChatGPT" login. Reconnect with "Codex browser (legacy)". |
+| 404 when the call starts                             | Your plan doesn't include Codex voice (ChatGPT Go). Plus or Pro does.                |
+| 403 or 429 when the call starts                      | Voice isn't on your plan, or the voice allowance is used up.                         |
+| GPT-Live can't hear you                              | System Settings › Privacy & Security › Microphone › allow OpenCode.                  |
+| Plugin changes don't show up                         | `opencode service restart`; see [development](docs/development.md).                  |
 
-Still stuck? [Open an issue](https://github.com/malhashemi/opencode-gpt-live/issues/new/choose) with your OS,
-terminal and the call log.
-
-## Contributing
-
-Contributions are welcome, from bug reports on a platform we haven't tested to new features. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md); the [development guide](docs/development.md) covers setup, running the plugin
-locally and testing calls without a microphone.
+## Development
 
 ```sh
-git clone https://github.com/malhashemi/opencode-gpt-live
-cd opencode-gpt-live
 bun install
-bun run check          # formatting, lint, types, tests
-bun run build:native   # the audio helper (Rust 1.91+)
+bun run check      # formatting, lint, types, tests
+bun run dev:gui    # rebuild the desktop bundle on changes
 ```
 
-## Acknowledgments
-
-Built on [OpenCode](https://opencode.ai) and [OpenTUI](https://github.com/anomalyco/opentui). The audio helper uses
-[webrtc-rs](https://github.com/webrtc-rs/webrtc), [cpal](https://github.com/RustAudio/cpal),
-[sonora](https://crates.io/crates/sonora) (WebRTC's audio processing in Rust), [Opus](https://opus-codec.org) and
-[rubato](https://github.com/HEnquist/rubato). Third-party licenses are listed in [NOTICE](NOTICE).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [development guide](docs/development.md).
 
 ## Disclaimer
 
-This is an independent project, not affiliated with or endorsed by OpenAI or the OpenCode team. ChatGPT and GPT-Live
-are trademarks of OpenAI. The plugin uses the voice service that comes with a ChatGPT subscription, which OpenAI may
-change at any time.
+An independent project, not affiliated with or endorsed by OpenAI or the OpenCode team. ChatGPT and GPT-Live are
+trademarks of OpenAI. The plugin uses the voice service that comes with a ChatGPT subscription through an undocumented
+Codex endpoint, which OpenAI may change or block at any time.
 
 ## License
 
-[MIT](LICENSE) © M. Adel Alhashemi
+[MIT](LICENSE). © M. Adel Alhashemi (original [opencode-gpt-live](https://github.com/malhashemi/opencode-gpt-live)) and
+Dev Agrawal (desktop fork). Third-party notices are in [NOTICE](NOTICE).

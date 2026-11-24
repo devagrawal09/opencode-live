@@ -4,138 +4,107 @@ Everything you need to change the plugin, run it from a checkout and test calls.
 
 ## Prerequisites
 
-| Tool                                       | Why                                            |
-| ------------------------------------------ | ---------------------------------------------- |
-| [Bun](https://bun.sh) 1.3+                 | Installs dependencies, runs tests and scripts. |
-| [OpenCode](https://opencode.ai) 2.0.14+    | Runs the plugin.                               |
-| [Rust](https://rustup.rs) 1.91+            | Builds the audio helper.                       |
-| CMake and a C compiler                     | Build libopus and ring for the helper.         |
-| Linux only: `libasound2-dev`, `pkg-config` | ALSA headers for audio.                        |
-| A ChatGPT sign-in in OpenCode              | Real calls. Tests and the UI work without one. |
+| Tool                                           | Why                                                  |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| [Bun](https://bun.sh) 1.3+                     | Installs dependencies, runs tests and scripts.       |
+| [OpenCode Desktop](https://opencode.ai) 2.3.0+ | Runs the plugin.                                     |
+| A ChatGPT Plus or Pro sign-in in OpenCode      | Real calls. Tests and the build work without one.    |
+| A microphone                                   | Real calls. There is no file-based or headless mode. |
+
+The sign-in must be OpenAI › "Codex browser (legacy)" under `/connect`. "Sign in with ChatGPT" logins have no account
+ID and are refused; ChatGPT Go accounts are rejected by OpenAI with a 404.
 
 ## Setup
 
 ```sh
-git clone https://github.com/malhashemi/opencode-gpt-live
-cd opencode-gpt-live
+git clone https://github.com/devagrawal09/opencode-live
+cd opencode-live
 bun install
-bun run build:native
+bun run build:gui
 ```
 
-`bun run build:native` writes `native/target/release/gpt-live-host`, which the plugin finds automatically when it runs
-from the checkout.
+`bun run build:gui` writes `dist/gui-experimental.cjs`, the desktop bundle that the package's `./gui-experimental`
+export points at. Without it the server plugin loads but no window gets the panel or commands.
 
 ## Running the plugin from your checkout
 
-Link the checkout into a test project's plugin directory; OpenCode loads plugins in `.opencode/plugins/` on start:
+Point OpenCode's config (`~/.config/opencode/opencode.json`, or a project's) at the checkout by absolute path:
 
-```sh
-mkdir -p ~/scratch/voice-test/.opencode/plugins
-ln -s "$PWD" ~/scratch/voice-test/.opencode/plugins/gpt-live
-cd ~/scratch/voice-test && opencode
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "/path/to/opencode-live",
+      "options": { "log": true },
+    },
+  ],
+}
 ```
 
-Then run `/voice`.
+Restart OpenCode once so it loads the plugin, open a session and run `/voice`.
+
+While you work, keep the bundle rebuilding:
+
+```sh
+bun run dev:gui    # vite build --watch
+```
 
 - **Server plugin changes** (`src/server`, `src/shared`) reload on save. Reloading ends an active call.
-- **Terminal plugin changes** (`src/tui`, `tui.ts`) need an OpenCode restart.
-- **Helper changes** need `bun run build:native`, then a new call.
+- **Window changes** (`src/gui`, `gui.tsx`) need the bundle rebuilt (`dev:gui` does it). Windows only take the new
+  bundle after a clean server reload of the plugin; if a window still shows the old behavior, press Cmd+R in it.
+- **Electron main changes** (`src/gui/main.ts`, `src/gui/wake-assets.ts`) run in the app's main process. If a reload
+  does not pick them up, quit and reopen the app.
+- **Prompt changes** (`src/server/prompts/`) need nothing: prompts are read at the start of every call.
+
+### When a reload goes wrong
+
+Hot reload can leave a stale module cache after an edit that touches several files at once (an export added in one
+file and imported in another). The plugin then fails to load, and `~/.local/share/opencode/log/opencode.log` shows
+something like `Export named 'X' not found in module ...`. Restart the OpenCode service to clear it:
+
+```sh
+opencode service restart
+```
+
+That ends any call in progress. Afterwards, reload the windows (Cmd+R) so they pick up the current bundle.
 
 ## Checks
 
 ```sh
-bun run check      # oxfmt --check, oxlint, tsc, bun test
-bun run format     # format with oxfmt
-bun run lint:fix   # apply oxlint's automatic fixes
-
-cargo fmt --manifest-path native/Cargo.toml
-cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path native/Cargo.toml
+bun run check       # oxfmt --check, oxlint, tsc (server and GUI configs), bun test
+bun run build:gui   # the desktop bundle; fails if ONNX Runtime's WebAssembly gets inlined
+bun run format      # format with oxfmt
+bun run lint:fix    # apply oxlint's automatic fixes
 ```
 
 oxfmt leaves the prompt section folders (`src/server/prompts/gpt-live`, `src/server/prompts/voice-agent`) alone:
 reformatting them would change the text the models read.
 
-CI runs all of these, lints the helper on macOS, Linux and Windows, and builds it for every release platform.
+CI (`.github/workflows/ci.yml`) runs formatting, lint, types, tests and the desktop build on every pull request.
 
-## Developer switches
+## Tests
 
-Environment variables for testing. They are not user settings.
+`test/` covers the logic that does not need a call: GPT-Live event parsing, call IDs, auth claims and the call's
+initial items (`live.test.ts`), the bridge's task outcomes, holding for the floor and hand-off steps
+(`bridge.test.ts`), the floor tracker (`floor.test.ts`), prompts and the pace and wake hints (`prompt.test.ts`),
+voices and paces (`rpc.test.ts`), the panel's transcript, debug events and hand-off models (`gui-*.test.ts`) and the
+wake word's idle clock and file checks (`wake.test.ts`).
 
-| Variable              | Effect                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `GPT_LIVE_INPUT_FILE` | Use a WAV file as the microphone. It plays once, then silence.                                         |
-| `GPT_LIVE_OUTPUT`     | `none` discards GPT-Live's audio; a path writes it to a WAV file.                                      |
-| `GPT_LIVE_AUTOSTART`  | Start a call as soon as a session is open.                                                             |
-| `GPT_LIVE_DEBUG`      | Path to a JSONL file for UI diagnostics: which aura surface was picked, terminal capabilities, errors. |
-| `GPT_LIVE_VISUAL`     | Force the aura surface: `kitty`, `herdr` or `blocks`.                                                  |
-| `GPT_LIVE_HOST`       | Path to a `gpt-live-host` binary to use instead of the usual lookup.                                   |
+Audio, WebRTC and the wake word listener run only in a real window. Nothing in the repository fakes the microphone,
+so testing a call means talking to it in OpenCode Desktop.
 
-A hands-free test run: a recorded question as the microphone, no speaker, the call starting on its own:
+## Debugging calls
 
-```sh
-say -o /tmp/question.aiff "What does this project do?"          # macOS; any 16-bit WAV works
-ffmpeg -y -i /tmp/question.aiff -ar 48000 -ac 1 /tmp/question.wav
-GPT_LIVE_INPUT_FILE=/tmp/question.wav GPT_LIVE_OUTPUT=none GPT_LIVE_AUTOSTART=1 opencode
-```
-
-### Headless end-to-end call
-
-`scripts/e2e-call.ts` places a real call without the terminal UI: it starts the helper, creates the call through the
-server plugin and prints the transcript. The project directory must load the plugin (for example through the symlink
-above).
-
-```sh
-bun run e2e ~/scratch/voice-test --speak "What does this project do?"
-bun run e2e ~/scratch/voice-test --devices     # real microphone and speaker
-```
-
-### Call logs
-
-With logging on, each call writes `~/.local/state/opencode-gpt-live/calls/<time>-<callID>.jsonl`: transcripts,
-hand-offs, tool calls and errors. It is the first place to look when a call misbehaves.
-
-## Working on the aura
-
-`scripts/render-aura.ts` renders `assets/aura.webp` for the README with the real renderer. Run it after changing
-`src/tui/aura.ts` (requires ImageMagick):
-
-```sh
-bun scripts/render-aura.ts
-```
-
-In the terminal, `GPT_LIVE_VISUAL=blocks` shows the half-block fallback in any terminal, and `GPT_LIVE_DEBUG` records
-which surface was chosen and why.
+- **Call logs.** With `log` on (the default), each call writes
+  `~/.local/state/opencode-gpt-live/calls/<time>-<callID>.jsonl`: transcripts, hand-offs, voice-agent steps, tool
+  calls, holds, errors and the GPT-Live event types seen. Start here when a call misbehaves.
+- **GPT-Live events.** Run "Show GPT-Live events" from the command palette for a live list of the call's data-channel
+  events and their counts in the panel.
+- **Voice agent column.** Each hand-off's request, tools, reply and timing show in the panel; "Open voice session"
+  shows the full voice session.
+- **OpenCode's log.** `~/.local/share/opencode/log/opencode.log` has plugin load errors and server-side failures.
 
 ## Releases
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please):
-
-1. Merge pull requests with [Conventional Commit](https://www.conventionalcommits.org/) titles (`feat:`, `fix:`,
-   `docs:` and so on). `feat` bumps the minor version, `fix` the patch version.
-2. release-please keeps a release pull request open with the next version and the changelog entry. Edit its
-   `CHANGELOG.md` if the wording needs polish. GitHub does not run CI for pull requests opened by GitHub Actions, so
-   the release workflow starts CI on that branch itself; its checks appear on the release pull request like any other.
-3. Merging the release pull request tags the release. The release workflow then builds the helper for every platform,
-   attaches the binaries and `SHA256SUMS` to the GitHub release, and publishes to npm:
-   - `opencode-gpt-live-<platform>-<arch>`: one package per platform, carrying the helper.
-   - `opencode-gpt-live`: the plugin, with the platform packages as optional dependencies.
-
-Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers): each package trusts
-`release.yml` in the `npm` environment of this repository, so no npm token exists anywhere, and every version carries
-a provenance attestation linking it to the workflow run that built it.
-
-### Supported platforms
-
-Defined in `scripts/targets.ts` and `.github/workflows/build-helper.yml`:
-
-| Target         | Runner                      |
-| -------------- | --------------------------- |
-| `darwin-arm64` | `macos-15`                  |
-| `darwin-x64`   | `macos-15` (cross-compiled) |
-| `linux-x64`    | `ubuntu-22.04`              |
-| `linux-arm64`  | `ubuntu-22.04-arm`          |
-| `win32-x64`    | `windows-2022`              |
-
-Adding a platform means adding it to both files; `test/targets.test.ts` checks that package names match what the
-plugin looks for at runtime.
+There is no release automation. Pull requests use [Conventional Commit](https://www.conventionalcommits.org/) titles
+so a changelog can be written from them.

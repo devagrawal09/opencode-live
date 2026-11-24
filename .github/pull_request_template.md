@@ -4,11 +4,10 @@
 
 ## How I tested it
 
-<!-- Commands, and for call or UI changes: a real call on which OS and terminal. -->
+<!-- Commands, and for call or panel changes: what you tried in a real call in OpenCode Desktop. -->
 
 ## Checklist
 
 - [ ] The title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`...)
-- [ ] `bun run check` passes
-- [ ] For `native/` changes: `cargo fmt`, `cargo clippy -- -D warnings` and `cargo test` pass
+- [ ] `bun run check` and `bun run build:gui` pass
 - [ ] Docs updated if behavior or options changed

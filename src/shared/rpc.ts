@@ -1,7 +1,7 @@
 import type { Rpc } from "@opencode/plugin/rpc"
 import { z } from "zod"
 
-/** Type-only stand-in for Rpc.define, so the terminal bundle does not pull in the schema runtime. */
+/** Type-only stand-in for Rpc.define, so the desktop bundle does not pull in the schema runtime. */
 function define<const D extends Rpc.PortableDefinition>(definition: D): D {
   return definition
 }
@@ -101,7 +101,7 @@ export const HandoffStep = z.discriminatedUnion("kind", [
 export type HandoffStep = z.infer<typeof HandoffStep>
 
 /**
- * Contract between the terminal plugin (audio, UI) and the server plugin
+ * Contract between the desktop window part (audio, UI) and the server plugin
  * (ChatGPT credentials, GPT-Live control channel, OpenCode session bridge).
  */
 export const GptLive = define({

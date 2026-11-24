@@ -1,22 +1,39 @@
-opencode-gpt-live
-Copyright (c) 2026 M. Adel Alhashemi
+opencode-live
+Copyright (c) 2026 Dev Agrawal
 Licensed under the MIT License (see LICENSE).
 
-The prebuilt gpt-live-host audio helper includes third-party software, each under its
-own license. The main components:
+Based on opencode-gpt-live (https://github.com/malhashemi/opencode-gpt-live)
+Copyright (c) 2026 M. Adel Alhashemi
+Licensed under the MIT License.
 
-  webrtc, rtc (webrtc-rs)   MIT OR Apache-2.0   https://github.com/webrtc-rs/webrtc
-  cpal                      Apache-2.0          https://github.com/RustAudio/cpal
-  sonora                    BSD-3-Clause        https://crates.io/crates/sonora
-                            (a Rust port of WebRTC audio processing)
-  libopus (via opusic-sys)  BSD-3-Clause        https://opus-codec.org
-  opus                      MIT OR Apache-2.0   https://crates.io/crates/opus
-  rubato                    MIT OR Apache-2.0   https://github.com/HEnquist/rubato
-  ring                      Apache-2.0 AND ISC  https://github.com/briansmith/ring
-  tokio                     MIT                 https://tokio.rs
+The desktop bundle (dist/gui-experimental.cjs) includes third-party software, each under
+its own license:
 
-The complete list of Rust dependencies and versions is in native/Cargo.lock; run
-`cargo tree --manifest-path native/Cargo.toml` to see how they fit together.
+  @livekit/wakeword         Apache-2.0          https://github.com/livekit/livekit-wakeword
+  onnxruntime-web           MIT                 https://github.com/microsoft/onnxruntime
+
+At runtime, when the wake word is turned on, the app downloads and checks against a pinned
+SHA-256:
+
+  hey_jarvis.onnx           Apache-2.0          https://github.com/livekit/livekit-wakeword
+                            (LiveKit WakeWord's "hey jarvis" model, v2.1.3)
+  ort-wasm-simd-threaded    MIT                 https://github.com/microsoft/onnxruntime
+                            (ONNX Runtime WebAssembly, same version as onnxruntime-web)
+
+LiveKit WakeWord's notice:
+
+  livekit-wakeword
+  Copyright 2025-2026 LiveKit, Inc.
+
+  This product includes software and machine learning models developed at LiveKit, Inc.
+  (https://livekit.io/), including the pretrained encoders livekit-wakeword-encoder-standard
+  and livekit-wakeword-encoder-micro and the models built from them.
+
+  The source code and the model weights (*.onnx, *.tflite, encoders.tar.gz) are licensed
+  under the Apache License, Version 2.0. See LICENSE.
+
+  The models were trained in part on synthetic speech. LiveKit makes no representation
+  about how suitable they are for any particular use; see LICENSE for the warranty disclaimer.
 
 ChatGPT and GPT-Live are trademarks of OpenAI. This project is not affiliated with or
 endorsed by OpenAI or the OpenCode project.

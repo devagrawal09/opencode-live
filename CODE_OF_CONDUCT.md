@@ -29,8 +29,8 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Report unacceptable behavior to the maintainer through
-[GitHub's private reporting](https://github.com/malhashemi/opencode-gpt-live/security/advisories/new) or by contacting
-[@malhashemi](https://github.com/malhashemi) directly. All reports are reviewed promptly and kept confidential.
+[GitHub's private reporting](https://github.com/devagrawal09/opencode-live/security/advisories/new) or by contacting
+[@devagrawal09](https://github.com/devagrawal09) directly. All reports are reviewed promptly and kept confidential.
 
 Maintainers may remove, edit or reject comments, commits, code, issues and other contributions that do not align with
 this code of conduct, and may temporarily or permanently ban contributors for behavior they deem harmful. The full

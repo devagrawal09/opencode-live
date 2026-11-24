@@ -39,7 +39,7 @@ the project, and `~` expands to the home directory:
 {
   "plugins": [
     {
-      "package": "opencode-gpt-live",
+      "package": "opencode-live",
       "options": {
         "prompts": { "gptLive": "~/.config/opencode/voice/gpt-live", "voiceAgent": ".opencode/voice-agent.md" },
       },

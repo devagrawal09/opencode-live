@@ -344,7 +344,7 @@ export default Plugin.define({
         emitState("connecting")
 
         // Join the control channel in the background so the SDP answer returns immediately;
-        // the helper's ICE negotiation runs in parallel.
+        // the window's ICE negotiation runs in parallel.
         const joinControlChannel = async () => {
           const sideband = await Sideband.connect({
             callID: call.callID,
