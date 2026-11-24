@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test"
 import { claims } from "../src/server/auth"
 import { toolLabel } from "../src/server/bridge"
 import { background, filler, historyFrom, initialItems, speakable } from "../src/server/context"
-import { chunk, contextAppend, parseCallID, parseEvent } from "../src/server/live"
+import { chunk } from "../src/server/live"
+import { contextAppend, parseCallID, parseEvent } from "../src/server/live-chatgpt"
 
 describe("call id", () => {
   test("reads the rtc id from the Location header", () => {

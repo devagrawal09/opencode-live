@@ -1,6 +1,6 @@
 # opencode-live
 
-**Talk to OpenCode Desktop out loud.** Real-time voice calls with your OpenCode session, on your ChatGPT subscription.
+**Talk to OpenCode Desktop out loud.** Real-time voice calls with your OpenCode session, through OpenAI's GPT-Live API.
 You talk; GPT-Live, OpenAI's real-time voice model, answers as you speak, hands the real work to the session on your
 screen, and tells you how it went.
 
@@ -30,16 +30,20 @@ screen, and tells you how it went.
   permission prompts first.
 - **See everything.** The call panel shows the transcript and, side by side, what the voice agent did for each request:
   tools, reply and timings. An optional debug view lists GPT-Live's raw events.
-- **Pick a voice.** 26 voices and a speaking-pace hint, from the panel or **Settings › GPT-Live**.
+- **Pick a voice.** 38 voices and a speaking-pace hint, from the panel or **Settings › GPT-Live**.
 - **"Hey Jarvis" (experimental).** An on-device wake word starts a call hands-free; nothing is sent until you say it.
-- **No API key.** It uses the ChatGPT sign-in you already have in OpenCode.
+- **Documented API.** Calls use OpenAI's GPT-Live API with your API key, which never leaves the OpenCode server.
 
 ## Requirements
 
 - [OpenCode Desktop](https://opencode.ai) 2.3 or newer. Tested on macOS (Apple silicon).
-- A **ChatGPT Plus or Pro** plan, connected in OpenCode with **`/connect` › OpenAI › "Codex browser (legacy)"**.
-  - ChatGPT Go doesn't include voice through Codex: calls fail with a 404.
-  - The newer "Sign in with ChatGPT" login only covers text requests and hides the account ID GPT-Live needs.
+- An **OpenAI API key** from a project with access to GPT-Live. Add it in OpenCode with **`/connect` › OpenAI › API
+  key**, or set `OPENAI_API_KEY` where the OpenCode server runs, or the `apiKey` option.
+  - Cost: GPT-Live (`gpt-live-1.1`) is billed per second, about **$0.05 a minute (~$3 an hour) while active** and $0.02
+    a minute on standby. Each call bills its first 15 seconds up front (credited against the call). See
+    [GPT-Live pricing](https://developers.openai.com/api/docs/pricing#live-session-duration).
+  - The thinking runs in OpenCode (the voice agent uses your `voiceModel`), so there is no separate OpenAI backend
+    charge from GPT-Live itself; the voice agent's model is billed like any other OpenCode session.
 - A microphone and speakers (headphones work best).
 - [Bun](https://bun.sh) to build the plugin.
 
@@ -79,7 +83,7 @@ Restart OpenCode Desktop. The first call asks macOS for microphone access for Op
 | `/voice`                      | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>V</kbd> | Start or end a call on the current session              |
 | Mute voice call               | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>M</kbd> | Mute or unmute your microphone                          |
 | `/voice-new`                  |                                      | Start a call in a fresh voice conversation              |
-| `/voice-pick`                 |                                      | Open **Settings › GPT-Live**: voice and speaking pace   |
+| `/voice-pick`                 |                                      | Open **Settings › GPT-Live**: connection, voice, pace   |
 | Show voice call panel         |                                      | The call panel (also in the side panel's **+** menu)    |
 | Show GPT-Live events          |                                      | Toggle the debug view of GPT-Live's events in the panel |
 | Start listening for wake word |                                      | Toggle the "Hey Jarvis" wake word                       |
@@ -111,7 +115,10 @@ Options go in the plugin entry's `options`. All are optional.
 
 | Option                   | Default                | Description                                                                                             |
 | ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `voice`                  | `"cove"`               | GPT-Live's voice. The panel and **Settings › GPT-Live** override it. See [Voices](#voices).             |
+| `mode`                   | `"api"`                | `api`: OpenAI API key. `chatgpt`: ChatGPT plan ([advanced](#advanced-chatgpt-plan)). Settings override. |
+| `apiKey`                 |                        | OpenAI API key for `api` mode; `"{env:NAME}"` works. Else the `/connect` key, else `OPENAI_API_KEY`.    |
+| `liveModel`              | `"gpt-live-1.1"`       | GPT-Live model in `api` mode, e.g. `"gpt-live-1"`.                                                      |
+| `voice`                  | `"marin"`              | GPT-Live's voice. The panel and **Settings › GPT-Live** override it. See [Voices](#voices).             |
 | `pace`                   | `"normal"`             | Speaking-pace hint: `normal`, `slower` or `faster`. One sentence in GPT-Live's prompt, not a speed.     |
 | `voiceModel`             | `"openai/gpt-6.1-sol"` | Model for the voice agent, as `provider/model`. A fast model (e.g. `openai/gpt-6-luna`) feels snappier. |
 | `voiceVariant`           | `"medium"`             | Thinking level for that model.                                                                          |
@@ -125,9 +132,24 @@ their own agent (such as `claude-agent/*`) may not get the voice agent's prompt 
 
 ### Voices
 
-`cove`, `juniper`, `maple`, `spruce`, `ember`, `vale`, `breeze`, `arbor`, `sol`, `marin`, `aube`, `bubbie`, `haetsal`,
-`hanul`, `himari`, `leher`, `miko`, `neer`, `porto`, `rindo`, `rio`, `rivage`, `selva`, `sonna`, `tinta` and `viola`.
-A call's voice and pace are set when it starts; changes apply to the next call.
+`api` mode (default `marin`): `marin`, `cedar`, `alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, `verse`,
+and the GPT-Live voices `beacon`, `bossa`, `brise`, `calandria`, `cinder`, `compas`, `delta`, `destello`, `flitz`,
+`gleam`, `halo`, `harema`, `hornero`, `juni`, `luciernaga`, `meridian`, `nira`, `noeul`, `nuri`, `pearl`, `quartz`,
+`ripple`, `shida`, `sillage`, `stone`, `tempo`, `vesper` and `willow`
+([accents and languages](https://developers.openai.com/api/docs/guides/live-conversations#voice-options)).
+
+`chatgpt` mode (default `cove`): `cove`, `juniper`, `maple`, `spruce`, `ember`, `vale`, `breeze`, `arbor`, `sol`,
+`marin`, `aube`, `bubbie`, `haetsal`, `hanul`, `himari`, `leher`, `miko`, `neer`, `porto`, `rindo`, `rio`, `rivage`,
+`selva`, `sonna`, `tinta` and `viola`.
+
+The pickers offer the current mode's voices; a voice the mode doesn't have falls back to its default. A call's voice
+and pace are set when it starts; changes apply to the next call.
+
+### Advanced: ChatGPT plan
+
+`"mode": "chatgpt"` (or **Settings › GPT-Live › Connection › ChatGPT plan**) uses your ChatGPT Plus/Pro plan through
+Codex's undocumented voice endpoint, via the **"Codex browser (legacy)"** login in `/connect` › OpenAI. Unofficial; it
+may break.
 
 ### Custom prompts
 
@@ -151,7 +173,7 @@ read at the start of each call.
 flowchart LR
   you((You)) <-->|mic, speaker| window["Desktop window<br/>WebRTC, echo cancellation"]
   window <-->|audio| live["GPT-Live<br/>OpenAI real-time voice"]
-  window <-->|RPC| server["Server plugin<br/>ChatGPT sign-in, call setup"]
+  window <-->|RPC| server["Server plugin<br/>API key, call setup"]
   server <-->|control WebSocket| live
   server -->|hand-off| voice["Voice agent session<br/>thinks for GPT-Live"]
   voice -->|queue, steer, stop, permissions| main["Your OpenCode session<br/>does the work"]
@@ -160,7 +182,7 @@ flowchart LR
 
 - **The desktop window** owns the audio: microphone, speaker and the WebRTC connection to OpenAI, with Chromium's echo
   cancellation and noise suppression. It never sees your credentials.
-- **The server plugin** holds your ChatGPT credentials, creates the call with its context, joins its control channel
+- **The server plugin** holds your OpenAI credentials, creates the call with its context, joins its control channel
   and bridges GPT-Live to OpenCode. It holds spoken results while someone is talking.
 - **The voice agent** is a separate OpenCode session per coding session. GPT-Live hands it anything that needs thinking
   or acting. It can only talk to your main session (queue or steer work, check on it, read what it did, stop it, answer
@@ -171,9 +193,10 @@ The [architecture guide](docs/architecture.md) has the details.
 
 ## Privacy
 
-- Audio goes directly between your computer and OpenAI over encrypted WebRTC, under your ChatGPT account and OpenAI's
-  terms.
-- Your ChatGPT credentials stay in OpenCode; the plugin reads them from OpenCode's sign-in.
+- Audio goes directly between your computer and OpenAI over encrypted WebRTC, under your OpenAI account (API key or
+  ChatGPT plan) and OpenAI's terms.
+- Your API key or ChatGPT sign-in stays in the OpenCode server; the window never sees it, and it is kept out of errors
+  and logs.
 - Each call writes a local log of transcripts and events to `~/.local/state/opencode-gpt-live/calls/`
   (`$XDG_STATE_HOME` if set). Set `"log": false` to turn it off.
 - The voice conversation is an ordinary OpenCode session, stored like any other.
@@ -182,14 +205,17 @@ The [architecture guide](docs/architecture.md) has the details.
 
 ## Troubleshooting
 
-| Symptom                                              | Fix                                                                                  |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| "GPT-Live needs your ChatGPT subscription", or a 401 | `/connect` › OpenAI › "Codex browser (legacy)".                                      |
-| "…sign-in has no account ID"                         | You're on the "Sign in with ChatGPT" login. Reconnect with "Codex browser (legacy)". |
-| 404 when the call starts                             | Your plan doesn't include Codex voice (ChatGPT Go). Plus or Pro does.                |
-| 403 or 429 when the call starts                      | Voice isn't on your plan, or the voice allowance is used up.                         |
-| GPT-Live can't hear you                              | System Settings › Privacy & Security › Microphone › allow OpenCode.                  |
-| Plugin changes don't show up                         | `opencode service restart`; see [development](docs/development.md).                  |
+| Symptom                                         | Fix                                                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| API: "GPT-Live needs an OpenAI API key"         | `/connect` › OpenAI › API key, or `OPENAI_API_KEY`, or the `apiKey` option.                |
+| API: 401                                        | The key is wrong or revoked. Replace it in `/connect` › OpenAI.                            |
+| API: 403 or 404                                 | The key's project has no GPT-Live access, or `liveModel` is wrong.                         |
+| API: 429                                        | Out of credit or over a limit (concurrent sessions). Check billing on platform.openai.com. |
+| ChatGPT: "needs your ChatGPT subscription", 401 | `/connect` › OpenAI › "Codex browser (legacy)".                                            |
+| ChatGPT: "…sign-in has no account ID"           | That's the "Sign in with ChatGPT" login. Reconnect with "Codex browser (legacy)".          |
+| ChatGPT: 404, 403 or 429                        | No Codex voice on your plan (Go), or the voice allowance is used up.                       |
+| GPT-Live can't hear you                         | System Settings › Privacy & Security › Microphone › allow OpenCode.                        |
+| Plugin changes don't show up                    | `opencode service restart`; see [development](docs/development.md).                        |
 
 ## Development
 
@@ -204,8 +230,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [development guide](docs/developm
 ## Disclaimer
 
 An independent project, not affiliated with or endorsed by OpenAI or the OpenCode team. ChatGPT and GPT-Live are
-trademarks of OpenAI. The plugin uses the voice service that comes with a ChatGPT subscription through an undocumented
-Codex endpoint, which OpenAI may change or block at any time.
+trademarks of OpenAI. By default the plugin uses OpenAI's documented GPT-Live API with your API key. The optional
+`chatgpt` mode uses the voice service that comes with a ChatGPT subscription through an undocumented Codex endpoint,
+which OpenAI may change or block at any time.
 
 ## License
 

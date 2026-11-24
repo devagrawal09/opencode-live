@@ -12,10 +12,11 @@ The two system prompts behind a call, one folder each:
 `src/server/prompt.ts` reads every `.md` file in the folder in file-name order, removes HTML comments, trims each
 section and joins them with a blank line. Then it fills in the placeholders:
 
-| Placeholder     | Value                                |
-| --------------- | ------------------------------------ |
-| `{{project}}`   | The project folder's name            |
-| `{{directory}}` | The directory OpenCode is working in |
+| Placeholder                              | Value                                                                                                                             |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `{{project}}`                            | The project folder's name                                                                                                         |
+| `{{directory}}`                          | The directory OpenCode is working in                                                                                              |
+| `{{silentContext}}`, `{{spokenContext}}` | How the connection names silent and spoken context (`CONTEXT_WORDS` in `prompt.ts`); they differ between `api` and `chatgpt` mode |
 
 Extra instructions from the user's config (`instructions` for GPT-Live, `voiceAgentInstructions` for the voice agent)
 are appended under "Additional instructions from the user:". Conversation history is added after that by the server

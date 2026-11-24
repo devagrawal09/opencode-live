@@ -6,7 +6,21 @@ function define<const D extends Rpc.PortableDefinition>(definition: D): D {
   return definition
 }
 
-/** GPT-Live's voices. The first nine are the long-standing ones; the rest come from Codex's newer list. */
+/**
+ * How the server reaches GPT-Live. `api`: OpenAI's documented GPT-Live API with an API key (the default). `chatgpt`:
+ * the ChatGPT plan, through Codex's undocumented voice endpoint.
+ */
+export const MODES = ["api", "chatgpt"] as const
+export type Mode = (typeof MODES)[number]
+
+export const isMode = (value: unknown): value is Mode => MODES.includes(value as Mode)
+
+export const DEFAULT_MODE: Mode = "api"
+
+/**
+ * GPT-Live's voices on the ChatGPT/Codex endpoint (`chatgpt` mode). The first nine are the long-standing ones; the
+ * rest come from Codex's newer list.
+ */
 export const VOICES = [
   "cove",
   "juniper",
@@ -38,6 +52,64 @@ export const VOICES = [
 export type Voice = (typeof VOICES)[number]
 
 export const isVoice = (value: unknown): value is Voice => VOICES.includes(value as Voice)
+
+/** The public GPT-Live API's built-in voices (`api` mode), from the Live session reference; `marin` is its default. */
+export const API_VOICES = [
+  "marin",
+  "cedar",
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+  "beacon",
+  "bossa",
+  "brise",
+  "calandria",
+  "cinder",
+  "compas",
+  "delta",
+  "destello",
+  "flitz",
+  "gleam",
+  "halo",
+  "harema",
+  "hornero",
+  "juni",
+  "luciernaga",
+  "meridian",
+  "nira",
+  "noeul",
+  "nuri",
+  "pearl",
+  "quartz",
+  "ripple",
+  "shida",
+  "sillage",
+  "stone",
+  "tempo",
+  "vesper",
+  "willow",
+] as const
+export type ApiVoice = (typeof API_VOICES)[number]
+
+/** Every voice either mode knows, for the `start` schema; the server checks it against the call's mode. */
+export const ALL_VOICES = [...VOICES, ...API_VOICES.filter((voice) => voice !== "marin")] as unknown as readonly [
+  string,
+  ...string[],
+]
+
+const DEFAULT_VOICES: Record<Mode, string> = { api: "marin", chatgpt: "cove" }
+
+export const voicesFor = (mode: Mode): readonly string[] => (mode === "api" ? API_VOICES : VOICES)
+
+export const defaultVoiceFor = (mode: Mode) => DEFAULT_VOICES[mode]
+
+export const isVoiceFor = (mode: Mode, value: unknown): value is string =>
+  typeof value === "string" && voicesFor(mode).includes(value)
 
 /** A hint about speaking pace, added to GPT-Live's instructions; GPT-Live has no speed setting. */
 export const PACES = ["normal", "slower", "faster"] as const
@@ -102,7 +174,7 @@ export type HandoffStep = z.infer<typeof HandoffStep>
 
 /**
  * Contract between the desktop window part (audio, UI) and the server plugin
- * (ChatGPT credentials, GPT-Live control channel, OpenCode session bridge).
+ * (OpenAI credentials, GPT-Live control channel, OpenCode session bridge).
  */
 export const GptLive = define({
   id: "gptlive",
@@ -111,7 +183,10 @@ export const GptLive = define({
       input: z.object({
         sessionID: z.string(),
         sdp: z.string(),
-        voice: z.enum(VOICES).optional(),
+        /** Checked against the call's mode; a voice that mode does not have falls back to its default. */
+        voice: z.enum(ALL_VOICES).optional(),
+        /** How to reach GPT-Live for this call; the server's `mode` option when omitted. */
+        mode: z.enum(MODES).optional(),
         /** Speaking-pace hint for GPT-Live; the server's `pace` option when omitted. */
         pace: z.enum(PACES).optional(),
         /** Start a new voice session instead of continuing the linked one. */
@@ -124,6 +199,7 @@ export const GptLive = define({
         sdp: z.string(),
         model: z.string(),
         voice: z.string(),
+        mode: z.enum(MODES).optional(),
         voiceSessionID: z.string(),
         voiceTitle: z.string(),
         /** 1 for the first call in this voice session. */
@@ -144,10 +220,21 @@ export const GptLive = define({
       output: z.object({ stopped: z.boolean() }),
     },
     status: {
-      input: z.object({}),
+      input: z.object({
+        /** Report on this mode instead of the server's `mode` option, e.g. the one picked in the settings. */
+        mode: z.enum(MODES).optional(),
+      }),
       output: z.object({
+        /** Whether the mode's credentials are there: an API key, or a usable ChatGPT sign-in. */
         signedIn: z.boolean(),
+        /** Why not, when signedIn is false. */
+        reason: z.string().optional(),
         plan: z.string().optional(),
+        mode: z.enum(MODES).optional(),
+        model: z.string().optional(),
+        /** The voices the mode offers, and the one used when none is chosen. */
+        voices: z.array(z.string()).optional(),
+        defaultVoice: z.string().optional(),
         callID: z.string().optional(),
         sessionID: z.string().optional(),
         voiceSessionID: z.string().optional(),

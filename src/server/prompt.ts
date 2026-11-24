@@ -11,7 +11,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { Pace } from "../shared/rpc"
+import type { Mode, Pace } from "../shared/rpc"
 
 export type PromptName = "gpt-live" | "voice-agent"
 
@@ -33,6 +33,22 @@ export function wakeHint(wake: boolean | undefined): string {
   return wake ? `\n\n${WAKE_HINT}` : ""
 }
 
+/**
+ * How GPT-Live's prompt names silent and spoken context. The ChatGPT endpoint has `commentary` (silent) and
+ * `speakable` channels; the API has `thinking` (silent) and `commentary` (spoken) appends, so "commentary" means the
+ * opposite there.
+ */
+export const CONTEXT_WORDS: Record<Mode, { silentContext: string; spokenContext: string }> = {
+  chatgpt: {
+    silentContext: "Context on the commentary channel",
+    spokenContext: "Context on the speakable channel",
+  },
+  api: {
+    silentContext: "Thinking context (appended as thinking)",
+    spokenContext: "Commentary context (appended as commentary)",
+  },
+}
+
 export const BUILT_IN_PROMPTS = fileURLToPath(new URL("./prompts/", import.meta.url))
 
 const LABELS: Record<PromptName, string> = { "gpt-live": "GPT-Live", "voice-agent": "voice agent" }
@@ -46,6 +62,8 @@ export interface PromptInput {
   directory: string
   /** Values for {{placeholders}}. */
   variables: Record<string, string>
+  /** The connection's mode, for how the prompt names silent and spoken context; `api` when omitted. */
+  mode?: Mode
 }
 
 export interface LoadedPrompt {
@@ -93,7 +111,7 @@ export function loadPrompt(name: PromptName, input: PromptInput): LoadedPrompt {
     }
   }
   template ??= readPromptSource(path.join(BUILT_IN_PROMPTS, name))
-  let text = renderPrompt(template, input.variables)
+  let text = renderPrompt(template, { ...CONTEXT_WORDS[input.mode ?? "api"], ...input.variables })
   const extra = input.extra?.trim()
   if (extra) text = `${text}\n\nAdditional instructions from the user:\n${extra}`
   return { text, notices }

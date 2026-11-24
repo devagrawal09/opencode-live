@@ -12,7 +12,18 @@ import {
 } from "@opencode/plugin/gui"
 import { For, Match, Show, Switch, createEffect, createSignal, untrack } from "solid-js"
 
-import { PACES, VOICES, isPace, isVoice, type Pace, type Voice } from "../shared/rpc"
+import {
+  DEFAULT_MODE,
+  MODES,
+  PACES,
+  defaultVoiceFor,
+  isMode,
+  isPace,
+  isVoiceFor,
+  voicesFor,
+  type Mode,
+  type Pace,
+} from "../shared/rpc"
 import { createCall, type Call, type CallModel, type Target } from "./call"
 import { Host } from "./contract"
 import type { definition } from "./definition"
@@ -45,14 +56,19 @@ const targetOf = (session: MountedSession): Target => ({
 })
 
 export const setup: Plugin.Setup<typeof definition> = (ctx) => {
-  const options = ctx.options as { voice?: string; pace?: string }
-  const configuredVoice = isVoice(options.voice) ? options.voice : undefined
+  const options = ctx.options as { mode?: string; voice?: string; pace?: string }
+  const configuredMode: Mode = isMode(options.mode) ? options.mode : DEFAULT_MODE
   const configuredPace = isPace(options.pace) ? options.pace : undefined
   // The settings page's choices win over the plugin options; the server applies them when a call starts.
-  const chosenVoice = (): Voice | undefined => {
+  const chosenMode = (): Mode => ctx.stores.prefs.value.mode ?? configuredMode
+  /** The chosen voice if the chosen mode has it, else the configured one; unset leaves it to the server. */
+  const chosenVoice = (): string | undefined => {
+    const mode = chosenMode()
     const voice = ctx.stores.prefs.value.voice
-    return isVoice(voice) ? voice : configuredVoice
+    if (isVoiceFor(mode, voice)) return voice
+    return isVoiceFor(mode, options.voice) ? options.voice : undefined
   }
+  const shownVoice = () => chosenVoice() ?? defaultVoiceFor(chosenMode())
   const chosenPace = (): Pace | undefined => ctx.stores.prefs.value.pace ?? configuredPace
   const host = ctx.main(Host)
   const toast = (title: string, variant: "default" | "error") =>
@@ -68,7 +84,6 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
     client: (server) => ctx.servers.get(server)?.client ?? ctx.client,
     host,
     toast,
-    voice: configuredVoice,
     debug: () => ctx.stores.prefs.value.debugEvents,
     wake: {
       listening: () => wake.status() === "listening" || wake.status() === "loading",
@@ -109,7 +124,13 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
       return
     }
     openPanel(session)
-    void call.start(targetOf(session), { fresh, model: modelOf(), voice: chosenVoice(), pace: chosenPace() })
+    void call.start(targetOf(session), {
+      fresh,
+      model: modelOf(),
+      mode: ctx.stores.prefs.value.mode,
+      voice: chosenVoice(),
+      pace: chosenPace(),
+    })
   }
 
   const toggle = () => {
@@ -151,7 +172,13 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
       return
     }
     openPanel(session)
-    void call.start(targetOf(session), { model: modelOf(), voice: chosenVoice(), pace: chosenPace(), wake: true })
+    void call.start(targetOf(session), {
+      model: modelOf(),
+      mode: ctx.stores.prefs.value.mode,
+      voice: chosenVoice(),
+      pace: chosenPace(),
+      wake: true,
+    })
   }
 
   ctx.add(Style, css)
@@ -238,7 +265,7 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
     run: () => ctx.layout.settings(ctx.id),
   }))
 
-  const settingIDs = { voice: `${ctx.id}-voice`, pace: `${ctx.id}-pace` }
+  const settingIDs = { mode: `${ctx.id}-mode`, voice: `${ctx.id}-voice`, pace: `${ctx.id}-pace` }
   ctx.add(SettingsPage, {
     id: ctx.id,
     icon: ICON,
@@ -248,6 +275,12 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
     get entries() {
       return [
         { id: ctx.id, title: ctx.t("settings.title"), keywords: "gpt live voice call" },
+        {
+          id: settingIDs.mode,
+          title: ctx.t("settings.mode"),
+          description: ctx.t("settings.mode.description"),
+          keywords: "gpt live connection api key chatgpt plan subscription openai",
+        },
         {
           id: settingIDs.voice,
           title: ctx.t("settings.voice"),
@@ -266,7 +299,8 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
       <VoiceSettings
         call={call}
         ids={settingIDs}
-        voice={() => chosenVoice() ?? "cove"}
+        mode={chosenMode}
+        voice={shownVoice}
         pace={() => chosenPace() ?? "normal"}
       />
     ),
@@ -300,7 +334,8 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
         session={props.session}
         now={now}
         start={start}
-        voice={() => chosenVoice() ?? "cove"}
+        mode={chosenMode}
+        voice={shownVoice}
         pace={() => chosenPace() ?? "normal"}
       />
     ),
@@ -354,9 +389,14 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
   }
 }
 
-/** The settings page: GPT-Live's voice and a speaking-pace hint, both read when the next call starts. */
-/** Saves the voice and pace the next call uses; the settings page and the call panel share them. */
-function setVoice(ctx: Ctx, voice: Voice) {
+/** Saves the connection, voice and pace the next call uses; the settings page and the call panel share them. */
+function setMode(ctx: Ctx, mode: Mode) {
+  void ctx.stores.prefs.update((draft) => {
+    draft.mode = mode
+  })
+}
+
+function setVoice(ctx: Ctx, voice: string) {
   void ctx.stores.prefs.update((draft) => {
     draft.voice = voice
   })
@@ -368,7 +408,16 @@ function setPace(ctx: Ctx, pace: Pace) {
   })
 }
 
-function VoiceSettings(props: { call: Call; ids: { voice: string; pace: string }; voice(): Voice; pace(): Pace }) {
+const voiceOptions = (mode: Mode) => voicesFor(mode).map((voice) => ({ value: voice, label: voice }))
+
+/** The settings page: the connection, GPT-Live's voice and a speaking-pace hint, all read when the next call starts. */
+function VoiceSettings(props: {
+  call: Call
+  ids: { mode: string; voice: string; pace: string }
+  mode(): Mode
+  voice(): string
+  pace(): Pace
+}) {
   const ctx = usePlugin<typeof definition>() as Ctx
   const ui = ctx.ui
   return (
@@ -382,15 +431,27 @@ function VoiceSettings(props: { call: Call; ids: { voice: string; pace: string }
         }
       >
         <ui.SettingsRow
+          id={props.ids.mode}
+          title={ctx.t("settings.mode")}
+          description={ctx.t("settings.mode.description")}
+        >
+          <ui.Select
+            label={ctx.t("settings.mode")}
+            options={MODES.map((mode) => ({ value: mode, label: ctx.t(`settings.mode.${mode}`) }))}
+            value={props.mode()}
+            onChange={(mode: Mode) => setMode(ctx, mode)}
+          />
+        </ui.SettingsRow>
+        <ui.SettingsRow
           id={props.ids.voice}
           title={ctx.t("settings.voice")}
           description={ctx.t("settings.voice.description")}
         >
           <ui.Select
             label={ctx.t("settings.voice")}
-            options={VOICES.map((voice) => ({ value: voice, label: voice }))}
+            options={voiceOptions(props.mode())}
             value={props.voice()}
-            onChange={(voice: Voice) => setVoice(ctx, voice)}
+            onChange={(voice: string) => setVoice(ctx, voice)}
           />
         </ui.SettingsRow>
         <ui.SettingsRow
@@ -418,7 +479,8 @@ function CallPanel(props: {
   session: MountedSession
   now: () => number
   start(session: MountedSession, fresh?: boolean): void
-  voice(): Voice
+  mode(): Mode
+  voice(): string
   pace(): Pace
 }) {
   const ctx = usePlugin<typeof definition>() as Ctx
@@ -521,9 +583,9 @@ function CallPanel(props: {
         <div class="gptlive-choices">
           <ui.Select
             label={ctx.t("settings.voice")}
-            options={VOICES.map((voice) => ({ value: voice, label: voice }))}
+            options={voiceOptions(props.mode())}
             value={props.voice()}
-            onChange={(voice: Voice) => setVoice(ctx, voice)}
+            onChange={(voice: string) => setVoice(ctx, voice)}
           />
           <ui.Select
             label={ctx.t("settings.pace")}

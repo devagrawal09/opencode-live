@@ -8,11 +8,12 @@ Everything you need to change the plugin, run it from a checkout and test calls.
 | ---------------------------------------------- | ---------------------------------------------------- |
 | [Bun](https://bun.sh) 1.3+                     | Installs dependencies, runs tests and scripts.       |
 | [OpenCode Desktop](https://opencode.ai) 2.3.0+ | Runs the plugin.                                     |
-| A ChatGPT Plus or Pro sign-in in OpenCode      | Real calls. Tests and the build work without one.    |
+| An OpenAI API key with GPT-Live access         | Real calls. Tests and the build work without one.    |
 | A microphone                                   | Real calls. There is no file-based or headless mode. |
 
-The sign-in must be OpenAI › "Codex browser (legacy)" under `/connect`. "Sign in with ChatGPT" logins have no account
-ID and are refused; ChatGPT Go accounts are rejected by OpenAI with a 404.
+Add the key with `/connect` › OpenAI › API key, or `OPENAI_API_KEY`. For `"mode": "chatgpt"`, the sign-in must be
+OpenAI › "Codex browser (legacy)" under `/connect`. "Sign in with ChatGPT" logins have no account ID and are refused;
+ChatGPT Go accounts are rejected by OpenAI with a 404.
 
 ## Setup
 

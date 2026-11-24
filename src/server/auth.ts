@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 
-import type { Auth } from "./live"
+import type { Auth } from "./live-chatgpt"
 
 type Context = Plugin.Context
 
@@ -26,7 +26,8 @@ export function claims(token: string): Claims {
   }
 }
 
-const NOT_SIGNED_IN = 'GPT-Live needs your ChatGPT subscription. Run /connect, choose OpenAI, then "ChatGPT Pro/Plus".'
+const NOT_SIGNED_IN =
+  'GPT-Live in ChatGPT mode needs your ChatGPT subscription. Run /connect, choose OpenAI, then "Codex browser (legacy)". Or set mode to "api" to use an OpenAI API key.'
 const NO_ACCOUNT =
   'Your ChatGPT sign-in has no account ID, which GPT-Live needs. "Sign in with ChatGPT" logins hide it. Connect OpenAI again with "Codex browser (legacy)".'
 
@@ -65,4 +66,54 @@ export async function resolveAuth(ctx: Context): Promise<AuthResult> {
     ok: false,
     reason: credentials.some((credential) => credential?.type === "oauth") ? NO_ACCOUNT : NOT_SIGNED_IN,
   }
+}
+
+export const NO_API_KEY =
+  "GPT-Live needs an OpenAI API key: /connect → OpenAI → API key, or set mode to chatgpt to use a ChatGPT plan."
+
+export type KeySource = "option" | "connection" | "env"
+
+export type ApiKeyResult = { ok: true; key: string; source: KeySource } | { ok: false; reason: string }
+
+type ConnectionLike = { type?: string; id?: string; method?: string; name?: string }
+
+const usable = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0 && !/^\{env:[^}]*\}$/.test(value.trim())
+
+/**
+ * The API key for `api` mode, in order: the plugin's `apiKey` option (OpenCode substitutes `{env:NAME}` in config),
+ * OpenCode's OpenAI API-key connections (the active one first, then env-backed ones), then `OPENAI_API_KEY` in the
+ * server's environment. The key never leaves the server.
+ */
+export async function resolveApiKey(
+  ctx: Context,
+  option: unknown,
+  env: Record<string, string | undefined> = process.env,
+): Promise<ApiKeyResult> {
+  if (usable(option)) return { ok: true, key: option.trim(), source: "option" }
+  const integration = await ctx.integration.get({ integrationID: "openai" as never }).catch(() => undefined)
+  const connections = ((integration?.data as { connections?: unknown[] } | undefined)?.connections ??
+    []) as ConnectionLike[]
+  const candidates = connections.filter(
+    (connection) => (connection.type === "credential" && connection.method === "key") || connection.type === "env",
+  )
+  if (candidates.length) {
+    const active = (await ctx.integration.connection.active("openai").catch(() => undefined)) as
+      | ConnectionLike
+      | undefined
+    const same = (connection: ConnectionLike) =>
+      !!active && connection.type === active.type && connection.id === active.id && connection.name === active.name
+    // Saved keys before env-backed ones; the active connection first.
+    const rank = (connection: ConnectionLike) => (same(connection) ? 0 : connection.type === "credential" ? 1 : 2)
+    const ordered = candidates.toSorted((a, b) => rank(a) - rank(b))
+    const credentials = await Promise.all(
+      ordered.map((connection) => ctx.integration.connection.resolve(connection as never).catch(() => undefined)),
+    )
+    for (const credential of credentials) {
+      if (credential?.type === "key" && usable(credential.key))
+        return { ok: true, key: credential.key.trim(), source: "connection" }
+    }
+  }
+  if (usable(env.OPENAI_API_KEY)) return { ok: true, key: env.OPENAI_API_KEY.trim(), source: "env" }
+  return { ok: false, reason: NO_API_KEY }
 }

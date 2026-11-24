@@ -1,38 +1,58 @@
+import type { Mode } from "../shared/rpc"
 import type { InitialItem } from "./context"
 
 /**
- * GPT-Live wire contract for ChatGPT-subscription sessions.
+ * What a GPT-Live call needs from a wire contract, whichever way it reaches OpenAI. Two backends implement it:
  *
- * Call creation posts the WebRTC offer to the Codex backend, which returns the SDP answer
- * and a call id. The control channel ("sideband") is a WebSocket on the public Live API
- * joined with the same ChatGPT credentials. This mirrors what Codex does for its Voice
- * feature. None of it is a documented public API, so everything OpenAI-specific lives here.
+ * - `api` (live-api.ts): OpenAI's documented GPT-Live API with an API key. The default.
+ * - `chatgpt` (live-chatgpt.ts): the ChatGPT plan, through the undocumented Codex voice endpoint.
+ *
+ * The bridge, the floor and the outbox only ever see `LiveEvent`s and call `Sideband.append(text, channel,
+ * delegationID?)`; everything OpenAI-specific (URLs, headers, body shapes, event names) lives in the backends.
  */
 
-export const MODEL = "gpt-live-1.1-codex"
-const CALL_URL = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
-const SIDEBAND_URL = "wss://api.openai.com/v1/live/"
-const APPEND_MAX_BYTES = 500
-const CALL_ID = /^(rtc_[\w-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+export type Channel =
+  /** Something GPT-Live should say at its next turn. */
+  | "speakable"
+  /** Silent background GPT-Live can use but should not read out. */
+  | "commentary"
 
-export interface Auth {
-  token: string
-  accountID: string
-}
-
-export interface RequestIDs {
-  realtimeSessionID: string
-  sessionID: string
-  threadID: string
-}
-
-export interface LiveSession {
+/** A call's session settings, before a backend maps them to its wire shape. */
+export interface CallSession {
   model: string
   instructions: string
-  audio: { output: { voice: string } }
-  delegation: { type: "client"; ack_filler?: boolean }
+  voice: string
   /** Conversation the call starts with; see initialItems in context.ts. */
-  initial_items?: readonly InitialItem[]
+  items: readonly InitialItem[]
+}
+
+export interface CreatedCall {
+  /** The ID the control channel joins: a call ID (chatgpt) or a Live session ID (api). */
+  callID: string
+  sdp: string
+}
+
+export type Json = Record<string, unknown>
+
+/** Turns one call's raw control-channel messages into LiveEvents. Stateful: backends may need to group or wait. */
+export interface EventAdapter {
+  handle(payload: string, now: number): LiveEvent[]
+  /** Events that are due by `now` without a new message (e.g. a turn that went quiet). */
+  tick?(now: number): LiveEvent[]
+}
+
+export interface Backend {
+  readonly mode: Mode
+  /** The model a call uses unless configured otherwise. */
+  readonly model: string
+  createCall(input: { sdp: string; session: CallSession; signal?: AbortSignal }): Promise<CreatedCall>
+  /** The control WebSocket for a created call, and its handshake headers. */
+  sideband(callID: string): { url: string; headers: Record<string, string> }
+  events(): EventAdapter
+  /** Wire messages that add text to the call as speakable or silent context, for the call or one hand-off. */
+  contextAppend(text: string, channel: Channel, delegationID?: string): Json[]
+  /** Removes credentials from text that may be shown or logged. */
+  redact(text: string): string
 }
 
 export class LiveError extends Error {
@@ -43,75 +63,6 @@ export class LiveError extends Error {
     super(message)
     this.name = "LiveError"
   }
-}
-
-export function requestIDs(): RequestIDs {
-  return {
-    realtimeSessionID: crypto.randomUUID(),
-    sessionID: crypto.randomUUID(),
-    threadID: crypto.randomUUID(),
-  }
-}
-
-export function headers(auth: Auth, ids: RequestIDs, version: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${auth.token}`,
-    "ChatGPT-Account-ID": auth.accountID,
-    "OpenAI-Alpha": "quicksilver=v2",
-    "session-id": ids.sessionID,
-    "thread-id": ids.threadID,
-    "x-session-id": ids.realtimeSessionID,
-    originator: "opencode",
-    "User-Agent": `opencode-gpt-live/${version}`,
-  }
-}
-
-function redact(text: string, auth: Auth) {
-  return text.split(auth.token).join("[redacted]").split(auth.accountID).join("[redacted]")
-}
-
-function describe(status: number, detail: string) {
-  if (status === 401) return "ChatGPT rejected the sign-in (401). Sign in again with /connect → OpenAI → ChatGPT."
-  if (status === 403)
-    return "GPT-Live rejected the session (403). Your ChatGPT plan may not include voice, or the voice allowance is used up."
-  if (status === 429) return "GPT-Live voice limit reached (429). Try again later."
-  return `GPT-Live call creation failed (${status})${detail ? `: ${detail}` : ""}`
-}
-
-export function parseCallID(location: string | null, sessionHeader: string | null): string {
-  if (location) {
-    const segments = new URL(location, CALL_URL).pathname.split("/").filter(Boolean)
-    const id = segments.find((segment) => CALL_ID.test(segment))
-    if (id) return id
-  }
-  const fallback = sessionHeader?.trim()
-  if (fallback && CALL_ID.test(fallback)) return fallback
-  throw new LiveError("GPT-Live call response did not include a call id")
-}
-
-export async function createCall(input: {
-  auth: Auth
-  ids: RequestIDs
-  sdp: string
-  session: LiveSession
-  version: string
-  signal?: AbortSignal
-}): Promise<{ callID: string; sdp: string }> {
-  const response = await fetch(CALL_URL, {
-    method: "POST",
-    headers: { ...headers(input.auth, input.ids, input.version), "Content-Type": "application/json" },
-    body: JSON.stringify({ sdp: input.sdp, session: input.session }),
-    signal: input.signal,
-  })
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    const detail = redact(body.trim(), input.auth).slice(0, 300)
-    throw new LiveError(describe(response.status, detail), response.status)
-  }
-  const callID = parseCallID(response.headers.get("location"), response.headers.get("openai-session-id"))
-  const sdp = await response.text()
-  if (!sdp.trim()) throw new LiveError("GPT-Live returned an empty SDP answer", response.status)
-  return { callID, sdp }
 }
 
 export type LiveEvent =
@@ -129,21 +80,11 @@ export type LiveEvent =
   | { kind: "error"; message: string; fatal: boolean }
   | { kind: "other"; type: string; keys?: string[] }
 
-type Json = Record<string, unknown>
-
-function record(value: unknown): Json | undefined {
+export function record(value: unknown): Json | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : undefined
 }
 
-function errorMessage(event: Json): string {
-  const error = record(event.error)
-  if (typeof error?.message === "string") return error.message
-  if (typeof event.message === "string") return event.message
-  if (typeof event.error === "string") return event.error
-  return "GPT-Live error"
-}
-
-export function parseEvent(payload: string): LiveEvent | undefined {
+export function parseJson(payload: string): (Json & { type: string }) | undefined {
   let event: Json | undefined
   try {
     event = record(JSON.parse(payload))
@@ -151,75 +92,34 @@ export function parseEvent(payload: string): LiveEvent | undefined {
     return undefined
   }
   if (!event || typeof event.type !== "string") return undefined
-  const type = event.type
-  switch (type) {
-    case "session.started":
-      return { kind: "started" }
-    case "input_transcript.added":
-    case "output_transcript.added": {
-      const text = record(event.item)?.text
-      if (typeof text !== "string") return { kind: "other", type }
-      return { kind: "transcript", role: type.startsWith("input") ? "user" : "assistant", text, final: false }
-    }
-    case "session.input_transcript.delta":
-    case "session.output_transcript.delta": {
-      if (typeof event.delta !== "string") return { kind: "other", type }
-      return {
-        kind: "transcript",
-        role: type.includes("input") ? "user" : "assistant",
-        text: event.delta,
-        final: false,
-      }
-    }
-    case "turn.done": {
-      const turn = record(event.turn)
-      if ((turn?.role !== "user" && turn?.role !== "assistant") || typeof turn.transcript !== "string")
-        return { kind: "other", type }
-      return { kind: "transcript", role: turn.role, text: turn.transcript, final: true }
-    }
-    case "turn.created": {
-      const turn = record(event.turn)
-      if (turn?.role !== "user" && turn?.role !== "assistant")
-        return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
-      return { kind: "turn", role: turn.role, ...(typeof turn.id === "string" ? { id: turn.id } : {}) }
-    }
-    case "turn.delta":
-      if (typeof event.turn_id !== "string")
-        return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
-      return { kind: "turn-delta", id: event.turn_id }
-    case "session.output_audio.delta":
-      return { kind: "output-audio" }
-    case "delegation.created": {
-      const item = record(event.item)
-      if (!item || item.type !== "delegation" || item.target !== "client" || typeof item.id !== "string")
-        return { kind: "other", type }
-      const content = Array.isArray(item.content) ? item.content : []
-      const text = content
-        .map(record)
-        .filter((part) => part?.type === "input_text" && typeof part.text === "string")
-        .map((part) => part!.text as string)
-        .join("")
-      return { kind: "delegation", id: item.id, text }
-    }
-    case "output_audio_buffer.cleared":
-      return { kind: "speech-cleared" }
-    case "session.closed":
-      return { kind: "closed", reason: typeof event.reason === "string" ? event.reason : undefined }
-    case "error": {
-      const error = record(event.error)
-      const status = event.status ?? error?.status
-      const code = String(event.code ?? error?.code ?? "").toLowerCase()
-      const fatal =
-        status === 401 || ["authentication_error", "invalid_token", "token_expired", "invalid_api_key"].includes(code)
-      return { kind: "error", message: errorMessage(event), fatal }
-    }
-    default:
-      return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
-  }
+  return event as Json & { type: string }
 }
 
-/** Splits text into chunks that fit GPT-Live's per-append byte limit without breaking characters. */
-export function chunk(text: string, maxBytes = APPEND_MAX_BYTES): string[] {
+export function errorMessage(event: Json): string {
+  const error = record(event.error)
+  if (typeof error?.message === "string") return error.message
+  if (typeof event.message === "string") return event.message
+  if (typeof event.error === "string") return event.error
+  return "GPT-Live error"
+}
+
+const FATAL_CODES = new Set(["authentication_error", "invalid_token", "token_expired", "invalid_api_key"])
+
+export function errorEvent(event: Json): LiveEvent {
+  const error = record(event.error)
+  const status = event.status ?? error?.status
+  const code = String(event.code ?? error?.code ?? "").toLowerCase()
+  return { kind: "error", message: errorMessage(event), fatal: status === 401 || FATAL_CODES.has(code) }
+}
+
+export const otherEvent = (event: Json & { type: string }): LiveEvent => ({
+  kind: "other",
+  type: event.type,
+  keys: Object.keys(event).filter((key) => key !== "type"),
+})
+
+/** Splits text into chunks that fit a per-append byte limit without breaking characters. */
+export function chunk(text: string, maxBytes = 500): string[] {
   const encoder = new TextEncoder()
   if (encoder.encode(text).length <= maxBytes) return [text]
   const chunks: string[] = []
@@ -239,43 +139,54 @@ export function chunk(text: string, maxBytes = APPEND_MAX_BYTES): string[] {
   return chunks
 }
 
-export type Channel = "speakable" | "commentary"
-
-export function contextAppend(text: string, channel: Channel, delegationID?: string): Json[] {
-  return chunk(text).map((part) => {
-    const content = [{ type: "input_text", text: part }]
-    return delegationID
-      ? { type: "delegation.context.append", delegation_item_id: delegationID, channel, content }
-      : { type: "session.context.append", channel, content }
-  })
+/** Replaces each secret in text; empty secrets are ignored. */
+export function redactSecrets(text: string, secrets: readonly (string | undefined)[]) {
+  return secrets.reduce<string>(
+    (result, secret) => (secret && secret.length >= 4 ? result.split(secret).join("[redacted]") : result),
+    text,
+  )
 }
+
+/** A rejected call creation's response body, short, readable and without credentials. */
+export async function failureDetail(response: Response, redact: (text: string) => string) {
+  const body = await response.text().catch(() => "")
+  let detail = body.trim()
+  try {
+    const message = record(record(JSON.parse(detail))?.error)?.message
+    if (typeof message === "string") detail = message
+  } catch {}
+  return redact(detail).slice(0, 300)
+}
+
+const TICK_MS = 100
 
 /** The control WebSocket for a live call. */
 export class Sideband {
   private socket: WebSocket | undefined
   private closed = false
+  private ticker: ReturnType<typeof setInterval> | undefined
 
   private constructor(
+    private readonly backend: Backend,
+    private readonly adapter: EventAdapter,
     private readonly onEvent: (event: LiveEvent) => void,
     private readonly onClose: (reason: string) => void,
   ) {}
 
   static async connect(input: {
+    backend: Backend
     callID: string
-    auth: Auth
-    ids: RequestIDs
-    version: string
     onEvent: (event: LiveEvent) => void
     onClose: (reason: string) => void
     signal?: AbortSignal
   }): Promise<Sideband> {
-    const sideband = new Sideband(input.onEvent, input.onClose)
-    const url = `${SIDEBAND_URL}${encodeURIComponent(input.callID)}`
+    const sideband = new Sideband(input.backend, input.backend.events(), input.onEvent, input.onClose)
+    const { url, headers } = input.backend.sideband(input.callID)
     // Up to five attempts with exponential backoff; each waits for the previous one to fail.
     const attempt = async (index: number): Promise<Sideband> => {
       input.signal?.throwIfAborted()
       try {
-        await sideband.open(url, headers(input.auth, input.ids, input.version))
+        await sideband.open(url, headers)
         return sideband
       } catch (error) {
         if (index >= 4)
@@ -285,6 +196,10 @@ export class Sideband {
       }
     }
     return attempt(0)
+  }
+
+  private emit(events: readonly LiveEvent[]) {
+    for (const event of events) this.onEvent(event)
   }
 
   private open(url: string, handshake: Record<string, string>) {
@@ -300,12 +215,13 @@ export class Sideband {
         opened = true
         clearTimeout(timeout)
         this.socket = socket
+        const tick = this.adapter.tick?.bind(this.adapter)
+        if (tick) this.ticker = setInterval(() => this.emit(tick(Date.now())), TICK_MS)
         resolve()
       })
       socket.addEventListener("message", (message) => {
         if (typeof message.data !== "string") return
-        const event = parseEvent(message.data)
-        if (event) this.onEvent(event)
+        this.emit(this.adapter.handle(message.data, Date.now()))
       })
       socket.addEventListener("error", () => {
         if (!opened) {
@@ -319,9 +235,10 @@ export class Sideband {
           reject(new LiveError(`GPT-Live control channel closed during startup (${event.code})`))
           return
         }
+        clearInterval(this.ticker)
         if (!this.closed) {
           this.closed = true
-          this.onClose(event.reason || `closed (${event.code})`)
+          this.onClose(this.backend.redact(event.reason) || `closed (${event.code})`)
         }
       })
     })
@@ -332,12 +249,13 @@ export class Sideband {
   }
 
   append(text: string, channel: Channel, delegationID?: string) {
-    for (const message of contextAppend(text, channel, delegationID)) this.send(message)
+    for (const message of this.backend.contextAppend(text, channel, delegationID)) this.send(message)
   }
 
   close() {
     if (this.closed) return
     this.closed = true
+    clearInterval(this.ticker)
     this.send({ type: "session.close" })
     setTimeout(() => this.socket?.close(1000, "session closed"), 250)
   }

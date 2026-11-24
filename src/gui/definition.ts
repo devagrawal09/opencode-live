@@ -1,18 +1,19 @@
 import { Plugin, Store } from "@opencode/plugin/gui"
 import { Schema } from "effect"
 
-import { PACES } from "../shared/rpc"
+import { MODES, PACES } from "../shared/rpc"
 
 export const definition = Plugin.define({
   stores: {
     /**
-     * Window preferences; the debug view of GPT-Live events is off unless turned on. `voice` and `pace` are the
-     * choices from the settings page; unset, the plugin options decide. `wakeWord` is whether a window listens for
+     * Window preferences; the debug view of GPT-Live events is off unless turned on. `mode`, `voice` and `pace` are
+     * the choices from the settings page; unset, the plugin options decide. A voice the mode does not have is ignored. `wakeWord` is whether a window listens for
      * the wake word; off unless turned on.
      */
     prefs: Store.global(
       Schema.Struct({
         debugEvents: Schema.Boolean,
+        mode: Schema.optional(Schema.Literals(MODES)),
         voice: Schema.optional(Schema.String),
         pace: Schema.optional(Schema.Literals(PACES)),
         wakeWord: Schema.optional(Schema.Boolean),
@@ -118,7 +119,13 @@ export const definition = Plugin.define({
       "settings.pace.normal": "Normal",
       "settings.pace.slower": "Slower",
       "settings.pace.faster": "Faster",
-      "settings.active": "A call is up. Changes apply to your next call; this one keeps its voice and pace.",
+      "settings.mode": "Connection",
+      "settings.mode.description":
+        "How calls reach GPT-Live. An OpenAI API key uses the documented API, billed per minute to your OpenAI account. A ChatGPT plan uses Codex's unofficial voice endpoint and may break. Applies to your next call.",
+      "settings.mode.api": "OpenAI API key",
+      "settings.mode.chatgpt": "ChatGPT plan",
+      "settings.active":
+        "A call is up. Changes apply to your next call; this one keeps its connection, voice and pace.",
     },
   },
 })

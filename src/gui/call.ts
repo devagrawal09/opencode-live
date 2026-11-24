@@ -2,7 +2,7 @@ import type { Context, IpcClient } from "@opencode/plugin/gui"
 import { batch, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 
-import { GptLive, type Pace, type Voice } from "../shared/rpc"
+import { GptLive, type Mode, type Pace } from "../shared/rpc"
 import type { Host } from "./contract"
 import { append, nextID, queued, startCall, task, transcript, withPast, type Entry } from "./entries"
 import { EVENTS_KEPT, describeEvent, noisy, type LiveEventRow } from "./events"
@@ -33,6 +33,7 @@ export interface CallState {
   voiceSessionID?: string
   voice?: string
   model?: string
+  mode?: Mode
   voiceTitle?: string
   call?: number
   muted: boolean
@@ -66,7 +67,6 @@ interface Options {
   client(server: string): Client
   host: IpcClient<(typeof Host)["spec"]>
   toast(title: string, variant: "default" | "error"): void
-  voice?: Voice
   /** Whether the panel's debug view of GPT-Live events is on; events are only kept for it while it is. */
   debug?(): boolean
   wake?: WakeLink
@@ -214,7 +214,7 @@ export function createCall(options: Options) {
 
   async function start(
     target: Target,
-    input: { fresh?: boolean; model?: CallModel; voice?: Voice; pace?: Pace; wake?: boolean } = {},
+    input: { fresh?: boolean; model?: CallModel; mode?: Mode; voice?: string; pace?: Pace; wake?: boolean } = {},
   ) {
     if (disposed || active()) {
       if (input.wake) options.wake?.resume()
@@ -244,6 +244,7 @@ export function createCall(options: Options) {
         voiceSessionID: undefined,
         voice: undefined,
         model: undefined,
+        mode: undefined,
         voiceTitle: undefined,
         call: undefined,
         muted: false,
@@ -317,7 +318,8 @@ export function createCall(options: Options) {
         {
           sessionID: target.sessionID,
           sdp: offer,
-          voice: input.voice ?? options.voice,
+          voice: input.voice,
+          mode: input.mode,
           pace: input.pace,
           fresh: input.fresh,
           wake: input.wake || undefined,
@@ -342,6 +344,7 @@ export function createCall(options: Options) {
           voiceSessionID: call.voiceSessionID,
           voice: call.voice,
           model: call.model,
+          mode: call.mode,
           voiceTitle: call.voiceTitle,
           call: call.call,
         })

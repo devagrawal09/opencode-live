@@ -3,7 +3,8 @@
 opencode-live is an OpenCode Desktop plugin. One npm package carries two entries: a server plugin (`index.ts`) that
 runs inside the OpenCode server, and a desktop plugin (`gui.tsx`, bundled to `dist/gui-experimental.cjs`) that runs in
 every app window and in Electron's main process. The call's audio runs in the window over WebRTC; the server plugin
-owns the ChatGPT credentials, GPT-Live's control channel and the link to your coding session.
+owns the OpenAI credentials (an API key, or a ChatGPT sign-in), GPT-Live's control channel and the link to your coding
+session.
 
 This guide explains what each part owns, how a call flows through them, and the constraints that shaped the design.
 
@@ -18,7 +19,7 @@ flowchart LR
     voice["Voice session"]
     main["Main session"]
   end
-  openai["GPT-Live<br/>chatgpt.com / api.openai.com"]
+  openai["GPT-Live<br/>api.openai.com (or chatgpt.com)"]
 
   window <-->|"Ipc (Host)"| electron
   window <-->|"RPC gptlive"| server
@@ -31,51 +32,75 @@ flowchart LR
 
 ## Repository map
 
-| Path                     | What lives there                                                                                      |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `index.ts`               | Server plugin entry.                                                                                  |
-| `gui.tsx`                | Desktop entry (`./gui-experimental`): window `setup` and Electron `main`.                             |
-| `vite.config.ts`         | Bundles `gui.tsx` into `dist/gui-experimental.cjs`; keeps ONNX Runtime's WebAssembly out of it.       |
-| `src/shared/rpc.ts`      | The `GptLive` RPC contract between window and server: methods, events, voices, paces, hand-off steps. |
-| `src/server/index.ts`    | Server plugin: the voice agent's tools, the call lifecycle, voice-session continuity, heartbeats.     |
-| `src/server/live.ts`     | The GPT-Live wire contract: call creation, headers, the control WebSocket and its events.             |
-| `src/server/bridge.ts`   | Connects GPT-Live to OpenCode: hand-offs, coding-session updates, permissions, ending calls.          |
-| `src/server/floor.ts`    | Who has the floor: whether the user or GPT-Live is talking, so spoken results can wait.               |
-| `src/server/context.ts`  | Conversation history quoted as data, the call's initial items, and agent text made speakable.         |
-| `src/server/prompt.ts`   | Loads the system prompts: built-in section folders, user overrides, placeholders, pace/wake hints.    |
-| `src/server/prompts/`    | The prompts for GPT-Live and the voice agent, one Markdown file per section.                          |
-| `src/server/auth.ts`     | Reads OpenCode's ChatGPT OAuth sign-in.                                                               |
-| `src/server/log.ts`      | The per-call JSONL log.                                                                               |
-| `src/gui/window.tsx`     | Window setup: commands, the call panel, the composer pill, the menu item, the settings page.          |
-| `src/gui/call.ts`        | The window's call state, RPC calls and events, heartbeats, the idle hang-up.                          |
-| `src/gui/transport.ts`   | WebRTC in the window: microphone, peer, `oai-events` data channel, speaker, levels.                   |
-| `src/gui/entries.ts`     | The transcript model: lines, tasks, notices, dividers between calls.                                  |
-| `src/gui/handoffs.ts`    | The voice-agent column's model: each hand-off's steps, tools, reply and timing.                       |
-| `src/gui/events.ts`      | The optional debug view of GPT-Live's data-channel events.                                            |
-| `src/gui/scroll.ts`      | Follow the transcript only while it is scrolled to the bottom.                                        |
-| `src/gui/wake.ts`        | The wake word listener: the always-on microphone, the model, pausing during calls, the chime.         |
-| `src/gui/wake-assets.ts` | The wake word's model and ONNX Runtime WebAssembly: pinned, downloaded, cached.                       |
-| `src/gui/idle.ts`        | When a call started from the wake word has gone quiet.                                                |
-| `src/gui/main.ts`        | Electron main: microphone access, background throttling, hanging up on close, wake word host.         |
-| `src/gui/contract.ts`    | The `Host` Ipc between a window and main.                                                             |
-| `src/gui/definition.ts`  | The desktop plugin's stores (window preferences) and strings.                                         |
-| `src/gui/panel.css`      | The call panel's styles.                                                                              |
+| Path                         | What lives there                                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `index.ts`                   | Server plugin entry.                                                                                  |
+| `gui.tsx`                    | Desktop entry (`./gui-experimental`): window `setup` and Electron `main`.                             |
+| `vite.config.ts`             | Bundles `gui.tsx` into `dist/gui-experimental.cjs`; keeps ONNX Runtime's WebAssembly out of it.       |
+| `src/shared/rpc.ts`          | The `GptLive` RPC contract between window and server: methods, events, voices, paces, hand-off steps. |
+| `src/server/index.ts`        | Server plugin: the voice agent's tools, the call lifecycle, voice-session continuity, heartbeats.     |
+| `src/server/live.ts`         | The backend interface, shared event types and the control WebSocket (`Sideband`).                     |
+| `src/server/live-api.ts`     | `api` mode: the documented GPT-Live API (session creation, sideband, events, context appends).        |
+| `src/server/live-chatgpt.ts` | `chatgpt` mode: the undocumented ChatGPT/Codex endpoint.                                              |
+| `src/server/bridge.ts`       | Connects GPT-Live to OpenCode: hand-offs, coding-session updates, permissions, ending calls.          |
+| `src/server/floor.ts`        | Who has the floor: whether the user or GPT-Live is talking, so spoken results can wait.               |
+| `src/server/context.ts`      | Conversation history quoted as data, the call's initial items, and agent text made speakable.         |
+| `src/server/prompt.ts`       | Loads the system prompts: built-in section folders, user overrides, placeholders, pace/wake hints.    |
+| `src/server/prompts/`        | The prompts for GPT-Live and the voice agent, one Markdown file per section.                          |
+| `src/server/auth.ts`         | Finds the API key (option, `/connect` key, `OPENAI_API_KEY`) or OpenCode's ChatGPT OAuth sign-in.     |
+| `src/server/log.ts`          | The per-call JSONL log.                                                                               |
+| `src/gui/window.tsx`         | Window setup: commands, the call panel, the composer pill, the menu item, the settings page.          |
+| `src/gui/call.ts`            | The window's call state, RPC calls and events, heartbeats, the idle hang-up.                          |
+| `src/gui/transport.ts`       | WebRTC in the window: microphone, peer, `oai-events` data channel, speaker, levels.                   |
+| `src/gui/entries.ts`         | The transcript model: lines, tasks, notices, dividers between calls.                                  |
+| `src/gui/handoffs.ts`        | The voice-agent column's model: each hand-off's steps, tools, reply and timing.                       |
+| `src/gui/events.ts`          | The optional debug view of GPT-Live's data-channel events.                                            |
+| `src/gui/scroll.ts`          | Follow the transcript only while it is scrolled to the bottom.                                        |
+| `src/gui/wake.ts`            | The wake word listener: the always-on microphone, the model, pausing during calls, the chime.         |
+| `src/gui/wake-assets.ts`     | The wake word's model and ONNX Runtime WebAssembly: pinned, downloaded, cached.                       |
+| `src/gui/idle.ts`            | When a call started from the wake word has gone quiet.                                                |
+| `src/gui/main.ts`            | Electron main: microphone access, background throttling, hanging up on close, wake word host.         |
+| `src/gui/contract.ts`        | The `Host` Ipc between a window and main.                                                             |
+| `src/gui/definition.ts`      | The desktop plugin's stores (window preferences) and strings.                                         |
+| `src/gui/panel.css`          | The call panel's styles.                                                                              |
 
 ## The parts
 
 ### Server plugin
 
 `src/server/index.ts` registers the `GptLive` RPC (`status`, `start`, `stop`, `alive`, `say`, `trace`) and the voice
-agent's tools. It is the only part that sees the ChatGPT sign-in: `resolveAuth` finds an OpenAI OAuth connection in
-OpenCode, prefers the active one, and needs a token and a ChatGPT account ID (from the connection's metadata or the
-token's claims). "Sign in with ChatGPT" token-sharing logins carry no account ID, so the call is refused with a hint to
-connect "Codex browser (legacy)" instead.
+agent's tools. It is the only part that sees credentials. A call's **mode** comes from `start` (the window's Settings
+choice), else the `mode` option, else `api`.
 
-GPT-Live is reached through the undocumented ChatGPT/Codex realtime endpoint that Codex uses for its voice feature
-(`src/server/live.ts`): the model is `gpt-live-1.1-codex`, the call is created at
-`chatgpt.com/backend-api/codex/realtime/calls`, and the control channel is a WebSocket at `api.openai.com/v1/live/`,
-joined with the same ChatGPT credentials. Everything OpenAI-specific lives in that file. Plans without voice on this
-endpoint are rejected by OpenAI (ChatGPT Go gets a 404); 401, 403 and 429 are turned into readable errors.
+Each mode is a `Backend` (`src/server/live.ts`): call creation, model, session shape, sideband URL and headers, an
+event adapter and the context-append messages. Everything OpenAI-specific lives in the two backends; the bridge, the
+floor and the outbox only see `LiveEvent`s and call `sideband.append(text, channel, delegationID?)`.
+
+|                | `api` (default, `live-api.ts`)                                                                                                                    | `chatgpt` (`live-chatgpt.ts`)                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Credentials    | `apiKey` option, then OpenCode's OpenAI API-key connection (active first), then `OPENAI_API_KEY`                                                  | OpenCode's ChatGPT OAuth sign-in plus a ChatGPT account ID                                                                    |
+| Model          | `gpt-live-1.1` (`liveModel`)                                                                                                                      | `gpt-live-1.1-codex`                                                                                                          |
+| Call creation  | `POST api.openai.com/v1/live/sessions`, JSON `{ session, transport: { type: "webrtc", sdp } }`; the 201 body has `session.id` and `transport.sdp` | `POST chatgpt.com/backend-api/codex/realtime/calls`, JSON `{ sdp, session }` with Codex headers; the call ID is in `Location` |
+| Session        | `instructions`, `input` (our initial items), `audio.output.voice`, `delegation: { type: "client" }`                                               | the same, with `initial_items`                                                                                                |
+| Sideband       | `wss://api.openai.com/v1/live/sessions/{id}/attach`                                                                                               | `wss://api.openai.com/v1/live/{callID}`                                                                                       |
+| Spoken context | `session.commentary.append`                                                                                                                       | `…context.append` with `channel: "speakable"`                                                                                 |
+| Silent context | `session.thinking.append`                                                                                                                         | `…context.append` with `channel: "commentary"`                                                                                |
+| Per hand-off   | `delegation_id` on the same events (`null` for the call)                                                                                          | `delegation.context.append` with `delegation_item_id`                                                                         |
+| Events         | transcript deltas only; `session.delegation.created` without the request                                                                          | `turn.created`/`turn.done`, `delegation.created` with the request text                                                        |
+
+The API marks no turn ends and sends no request text, so its adapter (`ApiEvents`) ends a speaker's turn after 1.2
+seconds without transcript, and hands a delegation over 300 ms after it arrives (transcripts can trail it) with the
+user's words since the previous hand-off as the request. It drops events the sideband replays on attach (by
+`event_id`) and ignores reflected microphone audio. GPT-Live's prompt names the two kinds of context in each mode's
+words (`{{silentContext}}`, `{{spokenContext}}`), since the API's "commentary" is the spoken one.
+
+`resolveAuth` (chatgpt) finds an OpenAI OAuth connection, prefers the active one, and needs a token and a ChatGPT account
+ID (from the connection's metadata or the token's claims). "Sign in with ChatGPT" token-sharing logins carry no account
+ID, so the call is refused with a hint to connect "Codex browser (legacy)" instead. Plans without voice on that endpoint
+are rejected (ChatGPT Go gets a 404).
+
+401, 403, 404 and 429 are turned into readable errors per mode. Keys, tokens and account IDs are redacted from error
+text.
 
 There is one active call per server at a time.
 
@@ -92,8 +117,9 @@ There is one active call per server at a time.
   events and their counts sits below.
 - **A composer pill** on the call's sessions (live time, mute, panel, end), and on any session while the window
   listens for the wake word.
-- **Settings › GPT-Live**: voice and speaking pace. Choices are saved in a global store and win over the plugin's
-  `voice` and `pace` options; they apply to the next call.
+- **Settings › GPT-Live**: connection (OpenAI API key or ChatGPT plan), voice and speaking pace. Choices are saved in
+  a global store and win over the plugin's `mode`, `voice` and `pace` options; they apply to the next call. The voice
+  pickers list the chosen mode's voices; a stored voice the mode lacks falls back to the mode's default.
 
 `src/gui/call.ts` holds the window's call: it opens audio, calls `start`, subscribes to the server's events, sends
 heartbeats and tears down. A call is about one session on one server; the window talks to that session's server, which
@@ -116,10 +142,10 @@ may be the app's own (sidecar) server or a remote one.
 2. **Audio.** Main confirms microphone access. `WindowAudio` opens the microphone with echo cancellation, noise
    suppression and gain control (Chromium's WebRTC stack), adds one send/receive Opus track and the `oai-events` data
    channel, and waits for ICE gathering so the SDP offer carries every candidate (non-trickle).
-3. **Call setup.** The window calls the server's `start` RPC with the offer, voice, pace and flags (`fresh`, `wake`).
-   The server resolves the sign-in, finds or creates the voice session linked to this main session, loads the prompts
-   and builds the call's context (below), then posts the offer and session configuration to the calls endpoint. The
-   response carries the SDP answer and the call ID. `start` returns those plus the voice session's title, the call
+3. **Call setup.** The window calls the server's `start` RPC with the offer, mode, voice, pace and flags (`fresh`,
+   `wake`). The server resolves the mode's credentials, finds or creates the voice session linked to this main session, loads the prompts
+   and builds the call's context (below), then posts the offer and session configuration through the mode's backend.
+   The response carries the SDP answer and the call (or session) ID. `start` returns those plus the voice session's title, the call
    number and the last lines of the previous call for the panel.
 4. **Connect.** The window applies the answer and waits until the peer is connected and the data channel is open. In
    the background the server joins the control WebSocket (up to five attempts with backoff), opens the call log and
@@ -145,7 +171,7 @@ A call should know what it is about before anyone speaks. `start` gathers:
 
 These go into the call in two ways (`src/server/context.ts`):
 
-- **`initial_items`**, the conversation the call starts with: the last 20 earlier voice turns as real user and
+- **`initial_items`** (`input` in `api` mode), the conversation the call starts with: the last 20 earlier voice turns as real user and
   assistant messages, then one developer note. The note says that "the session" means the user's OpenCode coding
   session (by title and project), not the voice call, and carries recent session history. It tells GPT-Live to answer
   recap questions ("what were we doing?") itself from that history and the earlier calls, without delegating, and to
@@ -210,7 +236,7 @@ them per hand-off, with a timing line and expandable details, and links to the v
 
 With logging on (the `log` option, default `true`), each call writes
 `~/.local/state/opencode-gpt-live/calls/<time>-<callID>.jsonl` (`$XDG_STATE_HOME` if set). It records the start
-(voice, pace, wake, context size), turns, hand-offs, voice steps and replies, tasks, updates, holds and flushes,
+(mode, model, voice, pace, wake, context size), turns, hand-offs, voice steps and replies, tasks, updates, holds and flushes,
 errors, the first few of each GPT-Live event type the plugin does not act on (from the control channel and the
 window's data channel) and their counts at the end. It stays on this machine and is the first place to look when a
 call misbehaves.
@@ -254,4 +280,4 @@ silent, nothing queued and nothing working. After any call ends, listening resum
 - **Lost event stream.** Task outcomes arrive on OpenCode's event stream. If it ends or fails, open tasks are reported
   once as lost, new tasks are refused, and the call hangs up a few seconds later, once GPT-Live has said so.
 - **Control channel.** If the control WebSocket closes, the call closes. Errors from GPT-Live go to the panel and the
-  log; the ChatGPT token and account ID are redacted from error text.
+  log; the API key, ChatGPT token and account ID are redacted from error text.

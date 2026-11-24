@@ -1,15 +1,23 @@
 import { Plugin } from "@opencode/plugin"
 
 import pkg from "../../package.json" with { type: "json" }
-import { GptLive, isPace, isVoice, type Voice } from "../shared/rpc"
-import { resolveAuth } from "./auth"
+import { DEFAULT_MODE, GptLive, defaultVoiceFor, isMode, isPace, isVoiceFor, voicesFor, type Mode } from "../shared/rpc"
+import { resolveApiKey, resolveAuth } from "./auth"
 import { Bridge } from "./bridge"
 import { background, filler, historyFrom, initialItems, type HistoryEntry } from "./context"
-import { LiveError, MODEL, Sideband, createCall, requestIDs } from "./live"
+import { LiveError, Sideband, type Backend, type CreatedCall } from "./live"
+import { API_MODEL, apiBackend } from "./live-api"
+import { chatgptBackend } from "./live-chatgpt"
 import { CallLog } from "./log"
 import { loadPrompt, paceHint, wakeHint } from "./prompt"
 
 interface Options {
+  /** How to reach GPT-Live: `api` (an OpenAI API key, the default) or `chatgpt` (a ChatGPT plan, unofficial). */
+  mode?: string
+  /** OpenAI API key for `api` mode; `{env:NAME}` works. Otherwise OpenCode's OpenAI API-key connection or OPENAI_API_KEY. */
+  apiKey?: string
+  /** GPT-Live model in `api` mode (default gpt-live-1.1). */
+  liveModel?: string
   voice?: string
   /** Speaking-pace hint for GPT-Live: normal, slower or faster. */
   pace?: string
@@ -74,7 +82,23 @@ export default Plugin.define({
   id: "opencode-gpt-live",
   async setup(ctx) {
     const options = ctx.options as Options
-    const defaultVoice: Voice = isVoice(options.voice) ? options.voice : "cove"
+    const defaultMode: Mode = isMode(options.mode) ? options.mode : DEFAULT_MODE
+    const liveModel =
+      typeof options.liveModel === "string" && options.liveModel.trim() ? options.liveModel.trim() : API_MODEL
+    /** The requested voice if this mode has it, else the configured one, else the mode's default. */
+    const voiceFor = (mode: Mode, requested?: string) =>
+      isVoiceFor(mode, requested) ? requested : isVoiceFor(mode, options.voice) ? options.voice : defaultVoiceFor(mode)
+    /** The mode's wire contract with its credentials, resolved per call (OpenCode refreshes tokens on resolve). */
+    const connect = async (
+      mode: Mode,
+    ): Promise<{ ok: true; backend: Backend; plan?: string } | { ok: false; reason: string }> => {
+      if (mode === "api") {
+        const key = await resolveApiKey(ctx, options.apiKey)
+        return key.ok ? { ok: true, backend: apiBackend({ key: key.key }, pkg.version, liveModel) } : key
+      }
+      const auth = await resolveAuth(ctx)
+      return auth.ok ? { ok: true, backend: chatgptBackend(auth.auth, pkg.version), plan: auth.plan } : auth
+    }
     const defaultPace = isPace(options.pace) ? options.pace : undefined
     const voiceModel = parseModel(options.voiceModel ?? "openai/gpt-6.1-sol", options.voiceVariant ?? "medium")
     let active: Call | undefined
@@ -216,11 +240,17 @@ export default Plugin.define({
     await ctx.session.hook("compaction", (event) => shapeRequest(event as never))
 
     const registration = await ctx.rpc.register(GptLive, {
-      status: async () => {
-        const auth = await resolveAuth(ctx)
+      status: async (input) => {
+        const mode = input.mode ?? defaultMode
+        const connection = await connect(mode)
         return defined({
-          signedIn: auth.ok,
-          plan: auth.ok ? auth.plan : undefined,
+          signedIn: connection.ok,
+          reason: connection.ok ? undefined : connection.reason,
+          plan: connection.ok ? connection.plan : undefined,
+          mode,
+          model: connection.ok ? connection.backend.model : undefined,
+          voices: [...voicesFor(mode)],
+          defaultVoice: voiceFor(mode),
           callID: active?.callID,
           sessionID: active?.sessionID,
           voiceSessionID: active?.voiceSessionID,
@@ -231,10 +261,12 @@ export default Plugin.define({
         // Starting a call while another is still up (typically from a window that went away)
         // moves the call here.
         active?.end("Moved to another window")
-        const auth = await resolveAuth(ctx)
-        if (!auth.ok) return error("not_signed_in", auth.reason, { reason: auth.reason })
+        const mode = input.mode ?? defaultMode
+        const connection = await connect(mode)
+        if (!connection.ok) return error("not_signed_in", connection.reason, { reason: connection.reason })
+        const backend = connection.backend
 
-        const voice = input.voice ?? defaultVoice
+        const voice = voiceFor(mode, input.voice)
         const pace = input.pace ?? defaultPace
         const main = await ctx.session.get({ sessionID: input.sessionID as never }).catch(() => undefined)
         const mainTitle = (main as { title?: string } | undefined)?.title
@@ -281,22 +313,19 @@ export default Plugin.define({
           extra: options.instructions,
           directory: ctx.location.directory,
           variables,
+          mode,
         })
         const prompt = agentPrompt.text + background(history)
 
         // Earlier voice turns and what "the session" means, as context the call starts with.
         const items = initialItems({ project, title: mainTitle, previous, history })
-        const ids = requestIDs()
-        let call: { callID: string; sdp: string }
+        let call: CreatedCall
         try {
-          call = await createCall({
-            auth: auth.auth,
-            ids,
+          call = await backend.createCall({
             sdp: input.sdp,
-            version: pkg.version,
             signal,
             session: {
-              model: MODEL,
+              model: backend.model,
               instructions:
                 livePrompt.text +
                 paceHint(pace) +
@@ -308,14 +337,14 @@ export default Plugin.define({
                   4_000,
                 ) +
                 background(history, undefined, undefined, 4_000),
-              audio: { output: { voice } },
-              delegation: { type: "client" },
-              initial_items: items,
+              voice,
+              items,
             },
           })
         } catch (cause) {
           const status = cause instanceof LiveError ? (cause.status ?? 0) : 0
-          return error("rejected", cause instanceof Error ? cause.message : String(cause), { status })
+          const message = backend.redact(cause instanceof Error ? cause.message : String(cause))
+          return error("rejected", message, { status })
         }
 
         const entry: Call = {
@@ -347,10 +376,8 @@ export default Plugin.define({
         // the window's ICE negotiation runs in parallel.
         const joinControlChannel = async () => {
           const sideband = await Sideband.connect({
+            backend,
             callID: call.callID,
-            auth: auth.auth,
-            ids,
-            version: pkg.version,
             onEvent: (event) => entry.bridge?.handle(event),
             onClose: (reason) => finish("closed", reason),
           })
@@ -365,6 +392,8 @@ export default Plugin.define({
             callID: entry.callID,
             sessionID: entry.sessionID,
             voiceSessionID: entry.voiceSessionID,
+            mode,
+            model: backend.model,
             voice,
             pace: pace ?? "normal",
             wake: input.wake ?? false,
@@ -419,14 +448,15 @@ export default Plugin.define({
           emitState("live")
         }
         void joinControlChannel().catch((cause) =>
-          finish("error", cause instanceof Error ? cause.message : String(cause)),
+          finish("error", backend.redact(cause instanceof Error ? cause.message : String(cause))),
         )
 
         return {
           callID: call.callID,
           sdp: call.sdp,
-          model: MODEL,
+          model: backend.model,
           voice,
+          mode,
           voiceSessionID: voiceSession.id,
           voiceTitle,
           call: link.calls,

@@ -1,7 +1,7 @@
 {
   "name": "opencode-live",
   "version": "0.3.0",
-  "description": "Talk to OpenCode Desktop out loud: real-time GPT-Live voice calls on your ChatGPT subscription",
+  "description": "Talk to OpenCode Desktop out loud: real-time GPT-Live voice calls through OpenAI's GPT-Live API",
   "keywords": [
     "chatgpt",
     "gpt-live",
