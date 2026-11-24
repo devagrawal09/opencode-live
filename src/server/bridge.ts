@@ -1,11 +1,23 @@
 import type { Plugin } from "@opencode/plugin"
 
-import type { TaskStatus } from "../shared/rpc"
+import type { HandoffStep, TaskStatus } from "../shared/rpc"
 import { clip, speakable } from "./context"
+import { Floor } from "./floor"
 import type { LiveEvent, Sideband } from "./live"
 import type { CallLog } from "./log"
 
 type Context = Plugin.Context
+
+/** Something to be spoken that waits while the floor is busy. */
+type Outgoing =
+  | { kind: "permission"; text: string }
+  /** The voice agent's reply; with a delegation ID it answers that hand-off. */
+  | { kind: "reply"; text: string; delegationID?: string }
+  /** A task outcome; a newer one for the same task replaces it. */
+  | { kind: "outcome"; text: string; taskID?: string }
+
+/** Order within one merged append: permission prompts first. */
+const SPEAK_ORDER: Record<Outgoing["kind"], number> = { permission: 0, reply: 1, outcome: 2 }
 
 export interface BridgeEvents {
   transcript(role: "user" | "assistant", text: string, final: boolean): void
@@ -17,6 +29,8 @@ export interface BridgeEvents {
   end(reason: string): void
   /** A finished conversation turn, for persistence across calls. */
   turn?(role: "user" | "assistant", text: string): void
+  /** One step of a hand-off to the voice agent; `at` is in milliseconds since the epoch. */
+  handoff?(delegationID: string, at: number, step: HandoffStep): void
 }
 
 interface Task {
@@ -73,6 +87,9 @@ export function taskOutcomes(
     }
   })
 }
+
+/** How many events of each unhandled type are logged individually before only being counted. */
+const TRACE_FIRST = 3
 
 const TOOL_LABELS: Record<string, string> = {
   read: "reading files",
@@ -134,6 +151,27 @@ export class Bridge {
   private introduced = false
   private streamLost = false
   private lostTimer: ReturnType<typeof setTimeout> | undefined
+  /** Unhandled GPT-Live event types seen this call, by "source:type". */
+  private readonly traced = new Map<string, number>()
+  /** Whether the user or GPT-Live is talking; speakable output waits while it is busy. */
+  private readonly floor = new Floor()
+  /** Role of each turn GPT-Live started, so its deltas count for the right speaker. */
+  private readonly turnRoles = new Map<string, "user" | "assistant">()
+  /** Speakable output held until the floor is free. */
+  private outbox: Outgoing[] = []
+  private heldSince: number | undefined
+  private flushTimer: ReturnType<typeof setTimeout> | undefined
+  /** Runs once everything queued so far has been sent. */
+  private drained: (() => void) | undefined
+  /** Steps of the current voice run, held until its hand-off is known: a run can start before inbox delivery. */
+  private voiceSteps: { at: number; step: HandoffStep }[] = []
+  private voiceRunning = false
+  private voiceFirstToken = false
+  /** Tool names in the current voice run by call ID; `session.tool.called` carries only the ID. */
+  private readonly voiceTools = new Map<string, string>()
+  private voiceUsage: { input: number; output: number; cost: number } | undefined
+  /** The hand-off whose spoken answer was sent last, until GPT-Live starts saying it. */
+  private speaking: string | undefined
 
   constructor(
     private readonly ctx: Context,
@@ -150,6 +188,10 @@ export class Bridge {
   handle(event: LiveEvent) {
     switch (event.kind) {
       case "transcript":
+        // Before pump: a reply this transcript frees the floor for has not been spoken yet.
+        if (event.role === "assistant") this.markSpoken()
+        this.floor.onTranscript(event.role, event.final, Date.now())
+        this.pump()
         this.events.transcript(event.role, event.text, event.final)
         if (event.final && event.text.trim()) {
           this.turns.push({ role: event.role, text: event.text.trim() })
@@ -158,7 +200,32 @@ export class Bridge {
           this.events.turn?.(event.role, event.text.trim())
         }
         return
+      case "turn":
+        this.trace("sideband", "turn.created")
+        if (event.id) {
+          if (this.turnRoles.size >= 100) this.turnRoles.clear()
+          this.turnRoles.set(event.id, event.role)
+        }
+        this.floor.onTurnStarted(event.role, Date.now())
+        this.pump()
+        return
+      case "turn-delta": {
+        this.trace("sideband", "turn.delta")
+        const role = this.turnRoles.get(event.id)
+        if (!role) return
+        this.floor.onTurnActivity(role, Date.now())
+        this.pump()
+        return
+      }
+      case "output-audio":
+        this.trace("sideband", "session.output_audio.delta")
+        this.floor.onOutputAudio(Date.now())
+        this.pump()
+        return
       case "delegation":
+        // A newer request wins: an answer still waiting for the floor stays only as context for its own hand-off.
+        this.supersedeReply()
+        this.pump()
         void this.toVoice(event.id, event.text).catch((error) =>
           this.events.error(`Could not reach the voice agent: ${String(error)}`),
         )
@@ -169,25 +236,86 @@ export class Bridge {
       case "error":
         this.events.error(event.message)
         return
+      case "started":
+        this.trace("sideband", "session.started")
+        return
+      case "speech-cleared":
+        this.trace("sideband", "output_audio_buffer.cleared")
+        return
+      case "other":
+        this.trace("sideband", event.type, event.keys)
+        return
     }
+  }
+
+  /**
+   * Records GPT-Live events the plugin does not act on, to learn what the endpoint sends (e.g. speech start/stop):
+   * the first few of each type with their field names, then only a count, written when the call closes.
+   */
+  trace(source: "sideband" | "window", type: string, keys?: readonly string[], count = 1) {
+    const key = `${source}:${type}`
+    const seen = this.traced.get(key) ?? 0
+    this.traced.set(key, seen + count)
+    if (seen < TRACE_FIRST)
+      this.log?.write({ type: "live-event", source, event: type, ...(keys?.length ? { keys } : {}) })
   }
 
   private async toVoice(delegationID: string, raw: string) {
     const request = raw.trim()
     if (!request) return
+    const receivedAt = Date.now()
     this.log?.write({ type: "handoff", delegationID, request, turns: this.turns, updates: this.updates })
-    const text = handoff(request, this.turns, this.updates, this.introduced ? undefined : this.call)
+    const first = !this.introduced
+    const text = handoff(request, this.turns, this.updates, first ? this.call : undefined)
+    // Only the request and the sizes of its context: the hand-off itself stays in the voice session.
+    this.emitStep(delegationID, receivedAt, {
+      kind: "received",
+      request: clip(request, 600),
+      context: { turns: this.turns.length, updates: this.updates.length, chars: text.length, first },
+    })
     this.introduced = true
     this.turns = []
     this.updates = []
-    const entry = await this.ctx.session.prompt({
-      sessionID: this.voiceSessionID as never,
-      text,
-      delivery: "queue",
-      metadata: { gptLive: { delegationID } },
-    })
-    const inboxID = (entry as { id?: string }).id
+    let entry: unknown
+    try {
+      entry = await this.ctx.session.prompt({
+        sessionID: this.voiceSessionID as never,
+        text,
+        delivery: "queue",
+        metadata: { gptLive: { delegationID } },
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.emitStep(delegationID, Date.now(), {
+        kind: "replied",
+        channel: "none",
+        outcome: "failed",
+        text: clip(`Could not reach the voice agent: ${reason}`, 1_200),
+      })
+      throw error
+    }
+    this.emitStep(delegationID, Date.now(), { kind: "queued" })
+    const inboxID = (entry as { id?: string } | undefined)?.id
     if (inboxID) this.voiceInbox.set(inboxID, delegationID)
+  }
+
+  /** A step of the current voice run, held until the run's hand-off is known. */
+  private voiceStep(at: number, step: HandoffStep) {
+    if (this.currentDelegation) this.emitStep(this.currentDelegation, at, step)
+    else if (this.voiceSteps.length < 100) this.voiceSteps.push({ at, step })
+  }
+
+  private emitStep(delegationID: string, at: number, step: HandoffStep) {
+    this.log?.write({ type: "voice-step", delegationID, atMs: at, ...step })
+    this.events.handoff?.(delegationID, at, step)
+  }
+
+  /** GPT-Live started talking after a spoken answer went out, so it is (most likely) saying it. */
+  private markSpoken() {
+    const delegationID = this.speaking
+    if (!delegationID) return
+    this.speaking = undefined
+    this.emitStep(delegationID, Date.now(), { kind: "spoken" })
   }
 
   /** Tool: send a task or message to the main session. */
@@ -313,7 +441,8 @@ export class Bridge {
         const data = (event as { data?: Record<string, unknown> }).data
         if (!data) continue
         if (signal.aborted) return
-        if (data.sessionID === this.voiceSessionID) this.onVoiceEvent(event.type, data)
+        if (data.sessionID === this.voiceSessionID)
+          this.onVoiceEvent(event.type, data, eventTime((event as { created?: unknown }).created))
         else if (data.sessionID === this.mainSessionID) this.onMainEvent(event.type, data)
       }
       if (!signal.aborted) this.lostEvents("The OpenCode event stream ended")
@@ -328,31 +457,88 @@ export class Bridge {
     this.streamLost = true
     this.events.error(`Lost the OpenCode event stream: ${reason}`)
     this.applyOutcomes(taskOutcomes([...this.tasks.values()], "lost", { includeQueued: true }))
-    // Hang up only after GPT-Live has had time to say what happened, as endCall does.
+    // Hang up only after GPT-Live has had time to say what happened, as endCall does: the wait starts once the
+    // message has actually been sent, which may be after the user finishes talking.
     this.ending = true
-    this.lostTimer = setTimeout(() => this.events.end(`Lost the OpenCode event stream: ${reason}`), 4_500)
+    this.drained = () => {
+      this.lostTimer = setTimeout(() => this.events.end(`Lost the OpenCode event stream: ${reason}`), 4_500)
+    }
+    this.pump()
   }
 
-  private onVoiceEvent(type: string, data: Record<string, unknown>) {
+  private onVoiceEvent(type: string, data: Record<string, unknown>, at = Date.now()) {
     switch (type) {
       case "session.inbox.delivered": {
         const delegation = this.voiceInbox.get(String(data.inboxID))
         if (delegation) {
           this.voiceInbox.delete(String(data.inboxID))
+          const previous = this.currentDelegation
           this.currentDelegation = delegation
+          this.emitStep(delegation, at, { kind: "delivered" })
+          // Delivered into a run already answering an earlier hand-off: this one is being worked on from now.
+          if (this.voiceRunning && previous && previous !== delegation)
+            this.emitStep(delegation, at, { kind: "started" })
+          for (const held of this.voiceSteps.splice(0)) this.emitStep(delegation, held.at, held.step)
         }
         return
       }
       case "session.execution.started":
         this.voiceText = ""
         this.voiceDelegated = false
+        this.voiceSteps = []
+        this.voiceRunning = true
+        this.voiceFirstToken = false
+        this.voiceTools.clear()
+        this.voiceUsage = undefined
+        this.voiceStep(at, { kind: "started" })
         this.events.activity("voice", true, "thinking")
         return
+      case "session.step.first-token":
+        if (this.voiceFirstToken) return
+        this.voiceFirstToken = true
+        this.voiceStep(at, { kind: "first-token" })
+        return
+      case "session.step.ended": {
+        const tokens = data.tokens as { input?: unknown; output?: unknown; reasoning?: unknown } | undefined
+        const usage = (this.voiceUsage ??= { input: 0, output: 0, cost: 0 })
+        usage.input += finite(tokens?.input)
+        usage.output += finite(tokens?.output) + finite(tokens?.reasoning)
+        usage.cost += finite(data.cost)
+        return
+      }
       case "session.tool.input.started":
         if (typeof data.name !== "string") return
+        if (typeof data.id === "string") this.voiceTools.set(data.id, data.name)
         if (data.name === "gptlive_main_send") this.voiceDelegated = true
         this.events.activity("voice", true, toolLabel(data.name))
         return
+      case "session.tool.called": {
+        const id = String(data.id)
+        this.voiceStep(at, {
+          kind: "tool",
+          id,
+          name: this.voiceTools.get(id) ?? "tool",
+          status: "running",
+          args: brief(data.input, 300),
+        })
+        return
+      }
+      case "session.tool.success":
+      case "session.tool.failed": {
+        const id = String(data.id)
+        const failed = type === "session.tool.failed"
+        const result = failed
+          ? String((data.error as { message?: unknown } | undefined)?.message ?? "failed")
+          : contentText(data.content)
+        this.voiceStep(at, {
+          kind: "tool",
+          id,
+          name: this.voiceTools.get(id) ?? "tool",
+          status: failed ? "failed" : "done",
+          ...(result ? { result: clip(result, 400) } : {}),
+        })
+        return
+      }
       case "session.text.ended":
         if (typeof data.text === "string" && data.text.trim()) this.voiceText = data.text
         return
@@ -367,10 +553,25 @@ export class Bridge {
           : text
         // After handing work off, GPT-Live has already acknowledged; the result is spoken later.
         const channel = (this.voiceDelegated || !this.currentDelegation) && !failed ? "commentary" : "speakable"
-        if (message) this.log?.write({ type: "voice-reply", channel, text: message })
-        if (message) this.sideband.append(message, channel, this.currentDelegation)
+        const usage = this.voiceUsage
+        this.voiceStep(at, {
+          kind: "replied",
+          channel: message ? channel : "none",
+          ...(message ? { text: clip(message, 1_200) } : {}),
+          outcome: failed ? "failed" : type === "session.execution.interrupted" ? "interrupted" : "succeeded",
+          ...(usage ? { tokens: { input: usage.input, output: usage.output }, cost: usage.cost } : {}),
+        })
+        if (message) {
+          this.log?.write({ type: "voice-reply", delegationID: this.currentDelegation, channel, text: message })
+          // Commentary is silent, so only spoken answers wait for the floor.
+          if (channel === "speakable")
+            this.speak({ kind: "reply", text: message, delegationID: this.currentDelegation })
+          else this.sideband.append(message, channel, this.currentDelegation)
+        }
         this.currentDelegation = undefined
         this.voiceText = ""
+        this.voiceSteps = []
+        this.voiceRunning = false
         return
       }
     }
@@ -381,7 +582,7 @@ export class Bridge {
       case "permission.asked": {
         const resources = Array.isArray(data.resources) ? data.resources.join(", ") : ""
         const spoken = `The coding session needs permission to ${String(data.action ?? "continue")}${resources ? ` ${clip(resources, 160)}` : ""}. Ask the user whether to allow it once, always, or reject it.`
-        this.sideband.append(spoken, "speakable")
+        this.speak({ kind: "permission", text: spoken })
         this.notifyVoice(`${spoken} Request id: ${String(data.id)}.`)
         return
       }
@@ -430,7 +631,7 @@ export class Bridge {
   private failUnaccepted(task: Task, error: string) {
     if (task.status !== "queued") return
     this.setStatus(task, "failed", error)
-    this.announce(`The task "${clip(task.text, 120)}" failed before it started: ${clip(error, 300)}`)
+    this.announce(`The task "${clip(task.text, 120)}" failed before it started: ${clip(error, 300)}`, task.id)
   }
 
   /**
@@ -462,14 +663,76 @@ export class Bridge {
       const task = this.tasks.get(outcome.id)
       if (!task || (task.status !== "queued" && task.status !== "running")) continue
       this.setStatus(task, outcome.status, outcome.detail)
-      if (outcome.spoken) this.announce(outcome.spoken)
+      if (outcome.spoken) this.announce(outcome.spoken, outcome.id)
     }
   }
 
   /** Speak an outcome once and keep it for the voice agent's next hand-off. */
-  private announce(spoken: string) {
-    this.sideband.append(spoken, "speakable")
+  private announce(spoken: string, taskID?: string) {
+    this.speak({ kind: "outcome", text: spoken, taskID })
     this.notifyVoice(spoken)
+  }
+
+  /** Speaks now when the floor is free; otherwise holds it until the user and GPT-Live have finished talking. */
+  private speak(item: Outgoing) {
+    if (this.closed) return
+    if (item.kind === "outcome" && item.taskID)
+      this.outbox = this.outbox.filter((queued) => queued.kind !== "outcome" || queued.taskID !== item.taskID)
+    if (item.kind === "reply" && item.delegationID) this.supersedeReply()
+    this.outbox.push(item)
+    const now = Date.now()
+    const holder = this.floor.holder(now)
+    if (holder) {
+      this.heldSince ??= now
+      this.log?.write({ type: "held", kind: item.kind, holder, queued: this.outbox.length, text: clip(item.text, 120) })
+    }
+    this.pump()
+  }
+
+  /** Sends what is queued if the floor is free, or checks again when it should be. */
+  private pump() {
+    clearTimeout(this.flushTimer)
+    this.flushTimer = undefined
+    if (this.closed) return
+    if (this.outbox.length) {
+      const now = Date.now()
+      if (this.floor.busy(now)) {
+        this.flushTimer = setTimeout(() => this.pump(), this.floor.freeAt(now) - now)
+        return
+      }
+      this.flush(now)
+    }
+    this.heldSince = undefined
+    const drained = this.drained
+    this.drained = undefined
+    drained?.()
+  }
+
+  /** Everything queued as one append, so GPT-Live takes one turn for it: permission prompts first. */
+  private flush(now: number) {
+    const items = this.outbox.toSorted((a, b) => SPEAK_ORDER[a.kind] - SPEAK_ORDER[b.kind])
+    this.outbox = []
+    const reply = items.find((item) => item.kind === "reply" && item.delegationID)
+    const delegationID = reply?.kind === "reply" ? reply.delegationID : undefined
+    this.sideband.append(items.map((item) => item.text).join("\n\n"), "speakable", delegationID)
+    if (delegationID) this.speaking = delegationID
+    if (this.heldSince !== undefined)
+      this.log?.write({
+        type: "flushed",
+        kinds: items.map((item) => item.kind),
+        waitedMs: now - this.heldSince,
+        ...(delegationID ? { delegationID } : {}),
+      })
+  }
+
+  /** A held answer to an earlier hand-off becomes silent context on that hand-off instead of being spoken. */
+  private supersedeReply() {
+    const index = this.outbox.findIndex((item) => item.kind === "reply" && item.delegationID)
+    if (index < 0) return
+    const [reply] = this.outbox.splice(index, 1)
+    if (reply?.kind !== "reply" || !reply.delegationID) return
+    this.log?.write({ type: "superseded", delegationID: reply.delegationID, text: clip(reply.text, 120) })
+    this.sideband.append(reply.text, "commentary", reply.delegationID)
   }
 
   /** Queue a coding-session update for the voice agent's next hand-off (no extra turn). */
@@ -497,9 +760,55 @@ export class Bridge {
     if (this.closed) return
     this.closed = true
     clearTimeout(this.lostTimer)
+    clearTimeout(this.flushTimer)
+    if (this.outbox.length)
+      this.log?.write({
+        type: "dropped",
+        items: this.outbox.map((item) => ({ kind: item.kind, text: clip(item.text, 120) })),
+      })
+    this.outbox = []
+    this.drained = undefined
+    if (this.traced.size) this.log?.write({ type: "live-events", counts: Object.fromEntries(this.traced) })
     this.abort.abort()
     this.sideband.close()
   }
+}
+
+/** An OpenCode event's `created` time in milliseconds; now when it is missing. */
+export function eventTime(created: unknown) {
+  if (typeof created !== "number" || !Number.isFinite(created) || created <= 0) return Date.now()
+  // Seconds, should an event ever carry them.
+  return created < 1e12 ? created * 1_000 : created
+}
+
+function finite(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+/** Clipped JSON of a tool's input; nothing for an empty one. */
+function brief(value: unknown, max: number) {
+  try {
+    const text = JSON.stringify(value)
+    return text === undefined || text === "{}" ? undefined : clip(text, max)
+  } catch {
+    return undefined
+  }
+}
+
+/** The text parts of a tool result; files by name. */
+function contentText(content: unknown) {
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part: { type?: unknown; text?: unknown; name?: unknown; uri?: unknown }) =>
+      part?.type === "text" && typeof part.text === "string"
+        ? part.text
+        : part?.type === "file"
+          ? `[file ${String(part.name ?? part.uri ?? "")}]`
+          : "",
+    )
+    .filter(Boolean)
+    .join("\n")
+    .trim()
 }
 
 function escape(text: string) {

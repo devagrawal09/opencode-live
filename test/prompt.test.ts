@@ -3,7 +3,15 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { BUILT_IN_PROMPTS, loadPrompt, readPromptSource, renderPrompt, resolvePromptPath } from "../src/server/prompt"
+import {
+  BUILT_IN_PROMPTS,
+  loadPrompt,
+  paceHint,
+  readPromptSource,
+  renderPrompt,
+  resolvePromptPath,
+  wakeHint,
+} from "../src/server/prompt"
 
 const variables = { project: "demo", directory: "/work/demo" }
 const scratch = () => mkdtempSync(path.join(os.tmpdir(), "gpt-live-prompt-"))
@@ -74,5 +82,36 @@ describe("helpers", () => {
 
   test("unknown placeholders stay as written", () => {
     expect(renderPrompt("{{ project }} {{unknown}}", variables)).toBe("demo {{unknown}}")
+  })
+})
+
+describe("pace hint", () => {
+  test("adds nothing for normal or no pace", () => {
+    expect(paceHint(undefined)).toBe("")
+    expect(paceHint("normal")).toBe("")
+  })
+
+  test("is one sentence on its own paragraph for slower and faster", () => {
+    for (const pace of ["slower", "faster"] as const) {
+      const hint = paceHint(pace)
+      expect(hint.startsWith("\n\n")).toBe(true)
+      expect(hint.trim().split(/(?<=\.)\s/)).toHaveLength(1)
+    }
+    expect(paceHint("slower")).toContain("more slowly")
+    expect(paceHint("faster")).toContain("more quickly")
+  })
+})
+
+describe("wake hint", () => {
+  test("adds nothing unless the call started from the wake word", () => {
+    expect(wakeHint(undefined)).toBe("")
+    expect(wakeHint(false)).toBe("")
+  })
+
+  test("tells GPT-Live not to greet, on its own paragraph", () => {
+    const hint = wakeHint(true)
+    expect(hint.startsWith("\n\n")).toBe(true)
+    expect(hint).toContain("wake word")
+    expect(hint).toContain("Do not greet")
   })
 })

@@ -6,8 +6,44 @@ function define<const D extends Rpc.PortableDefinition>(definition: D): D {
   return definition
 }
 
-export const VOICES = ["cove", "juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol"] as const
+/** GPT-Live's voices. The first nine are the long-standing ones; the rest come from Codex's newer list. */
+export const VOICES = [
+  "cove",
+  "juniper",
+  "maple",
+  "spruce",
+  "ember",
+  "vale",
+  "breeze",
+  "arbor",
+  "sol",
+  "marin",
+  "aube",
+  "bubbie",
+  "haetsal",
+  "hanul",
+  "himari",
+  "leher",
+  "miko",
+  "neer",
+  "porto",
+  "rindo",
+  "rio",
+  "rivage",
+  "selva",
+  "sonna",
+  "tinta",
+  "viola",
+] as const
 export type Voice = (typeof VOICES)[number]
+
+export const isVoice = (value: unknown): value is Voice => VOICES.includes(value as Voice)
+
+/** A hint about speaking pace, added to GPT-Live's instructions; GPT-Live has no speed setting. */
+export const PACES = ["normal", "slower", "faster"] as const
+export type Pace = (typeof PACES)[number]
+
+export const isPace = (value: unknown): value is Pace => PACES.includes(value as Pace)
 
 export const Role = z.enum(["user", "assistant"])
 
@@ -16,6 +52,53 @@ export type CallState = z.infer<typeof CallState>
 
 export const TaskStatus = z.enum(["queued", "running", "done", "failed", "cancelled"])
 export type TaskStatus = z.infer<typeof TaskStatus>
+
+/**
+ * One step of a hand-off from GPT-Live to the voice agent, for the desktop's voice-agent view. Text is clipped, and
+ * only the request and the sizes of the context it came with are sent: never prompts, history or reasoning.
+ */
+export const HandoffStep = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("received"),
+    request: z.string(),
+    context: z.object({
+      /** Conversation turns since the previous hand-off. */
+      turns: z.number(),
+      /** Coding-session updates the voice agent had not seen. */
+      updates: z.number(),
+      /** Size of the whole message the voice agent got. */
+      chars: z.number(),
+      /** The first hand-off of the call, which also says the call started. */
+      first: z.boolean(),
+    }),
+  }),
+  z.object({ kind: z.literal("queued") }),
+  z.object({ kind: z.literal("delivered") }),
+  z.object({ kind: z.literal("started") }),
+  z.object({ kind: z.literal("first-token") }),
+  z.object({
+    kind: z.literal("tool"),
+    id: z.string(),
+    name: z.string(),
+    status: z.enum(["running", "done", "failed"]),
+    /** The input as clipped JSON. */
+    args: z.string().optional(),
+    /** The clipped text result, or the error message. */
+    result: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("replied"),
+    /** `none` when nothing went back to GPT-Live. */
+    channel: z.enum(["speakable", "commentary", "none"]),
+    text: z.string().optional(),
+    outcome: z.enum(["succeeded", "failed", "interrupted"]),
+    tokens: z.object({ input: z.number(), output: z.number() }).optional(),
+    cost: z.number().optional(),
+  }),
+  /** GPT-Live started talking after the answer was sent: approximate. */
+  z.object({ kind: z.literal("spoken") }),
+])
+export type HandoffStep = z.infer<typeof HandoffStep>
 
 /**
  * Contract between the terminal plugin (audio, UI) and the server plugin
@@ -29,8 +112,12 @@ export const GptLive = define({
         sessionID: z.string(),
         sdp: z.string(),
         voice: z.enum(VOICES).optional(),
+        /** Speaking-pace hint for GPT-Live; the server's `pace` option when omitted. */
+        pace: z.enum(PACES).optional(),
         /** Start a new voice session instead of continuing the linked one. */
         fresh: z.boolean().optional(),
+        /** The user started the call by saying the wake word; their request follows at once. */
+        wake: z.boolean().optional(),
       }),
       output: z.object({
         callID: z.string(),
@@ -75,6 +162,14 @@ export const GptLive = define({
       input: z.object({ callID: z.string(), text: z.string() }),
       output: z.object({ sent: z.boolean() }),
     },
+    /** Event types the window saw on the call's data channel, for the call log. */
+    trace: {
+      input: z.object({
+        callID: z.string(),
+        events: z.array(z.object({ type: z.string(), count: z.number(), keys: z.array(z.string()).optional() })),
+      }),
+      output: z.object({ ok: z.boolean() }),
+    },
   },
   events: {
     state: {
@@ -107,6 +202,15 @@ export const GptLive = define({
         scope: z.enum(["voice", "main"]),
         busy: z.boolean(),
         label: z.string().optional(),
+      }),
+    },
+    /** What the voice agent did with one hand-off, step by step. `at` is in milliseconds since the epoch. */
+    handoff: {
+      schema: z.object({
+        callID: z.string(),
+        delegationID: z.string(),
+        at: z.number(),
+        step: HandoffStep,
       }),
     },
   },

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { claims } from "../src/server/auth"
 import { toolLabel } from "../src/server/bridge"
-import { background, historyFrom, speakable } from "../src/server/context"
+import { background, filler, historyFrom, initialItems, speakable } from "../src/server/context"
 import { chunk, contextAppend, parseCallID, parseEvent } from "../src/server/live"
 
 describe("call id", () => {
@@ -52,6 +52,35 @@ describe("events", () => {
   test("auth errors are fatal", () => {
     const event = parseEvent(JSON.stringify({ type: "error", error: { code: "token_expired", message: "expired" } }))
     expect(event).toEqual({ kind: "error", message: "expired", fatal: true })
+  })
+  test("unknown events keep their type and field names", () => {
+    expect(parseEvent(JSON.stringify({ type: "input_speech.started", item_id: "x", at: 1 }))).toEqual({
+      kind: "other",
+      type: "input_speech.started",
+      keys: ["item_id", "at"],
+    })
+  })
+  test("turn starts, turn progress and output audio are floor signals", () => {
+    expect(parseEvent(JSON.stringify({ type: "turn.created", turn: { id: "turn_1", role: "user" } }))).toEqual({
+      kind: "turn",
+      role: "user",
+      id: "turn_1",
+    })
+    expect(parseEvent(JSON.stringify({ type: "turn.created", turn: { role: "assistant" } }))).toEqual({
+      kind: "turn",
+      role: "assistant",
+    })
+    expect(parseEvent(JSON.stringify({ type: "turn.created", turn: { id: "turn_2" } }))).toEqual({
+      kind: "other",
+      type: "turn.created",
+      keys: ["turn"],
+    })
+    expect(
+      parseEvent(JSON.stringify({ type: "turn.delta", turn_id: "turn_1", delta: "hi", start_ms: 0, end_ms: 200 })),
+    ).toEqual({ kind: "turn-delta", id: "turn_1" })
+    expect(parseEvent(JSON.stringify({ type: "session.output_audio.delta", delta: "AAAA" }))).toEqual({
+      kind: "output-audio",
+    })
   })
   test("ignores garbage", () => {
     expect(parseEvent("not json")).toBeUndefined()
@@ -115,5 +144,71 @@ describe("auth claims", () => {
     ).toString("base64url")
     expect(claims(`h.${payload}.s`)).toEqual({ chatgpt_account_id: "acc", chatgpt_plan_type: "pro" })
     expect(claims("garbage")).toEqual({})
+  })
+})
+
+const text = (item: { content: [{ text: string }] }) => item.content[0].text
+
+describe("call initial items", () => {
+  const history = [
+    { role: "user" as const, text: "fix the transcript scrolling" },
+    { role: "assistant" as const, text: "Fixed it in window.tsx." },
+  ]
+  const previous = [
+    { role: "user" as const, text: "summarize the plugin changes" },
+    { role: "assistant" as const, text: "Six local commits." },
+  ]
+  test("earlier voice turns become real messages, then a developer note closes the list", () => {
+    const items = initialItems({ project: "demo", title: "Voice plugin", previous, history })
+    expect(items.map((item) => [item.role, item.content[0].type])).toEqual([
+      ["user", "input_text"],
+      ["assistant", "output_text"],
+      ["developer", "input_text"],
+    ])
+    expect(text(items[0])).toBe("summarize the plugin changes")
+    const note = text(items[2])
+    expect(note).toContain("earlier voice calls")
+    expect(note).toContain('OpenCode coding session "Voice plugin" in the project "demo", not this voice call')
+    expect(note).toContain("Answer recap questions about it")
+    expect(note).toContain("<session_history>")
+    expect(note).toContain("Fixed it in window.tsx.")
+  })
+
+  test("a first call starts with only the developer note", () => {
+    const items = initialItems({ project: "demo", previous: [], history: [] })
+    expect(items).toHaveLength(1)
+    expect(items[0].role).toBe("developer")
+    expect(text(items[0])).not.toContain("earlier voice calls")
+    expect(text(items[0])).not.toContain("<session_history>")
+  })
+
+  test("keeps only the latest earlier turns", () => {
+    const many = Array.from({ length: 30 }, (_, index) => ({ role: "user" as const, text: `turn ${index}` }))
+    const items = initialItems({ project: "demo", previous: many, history: [] })
+    expect(items).toHaveLength(21)
+    expect(text(items[0])).toBe("turn 10")
+  })
+})
+
+describe("filler turns", () => {
+  test("backchannel-only turns are filler, with sound tags closed or cut off", () => {
+    expect(filler("Mm-hmm. Right. Yeah. Mm-hmm. Mm-hmm.")).toBe(true)
+    expect(filler("Mm-hmm. [lip Mm-hmm. [lip smack Right. Yeah. Mm-hmm.")).toBe(true)
+    expect(filler("[laughs] Okay.")).toBe(true)
+  })
+
+  test("anything with content is kept", () => {
+    expect(filler("Right, run the tests.")).toBe(false)
+    expect(filler("[laughs Sure, here is the plan")).toBe(false)
+    expect(filler("")).toBe(false)
+  })
+
+  test("earlier filler turns are left out of a call's initial items", () => {
+    const previous = [
+      { role: "assistant" as const, text: "Mm-hmm. Right. Yeah." },
+      { role: "user" as const, text: "what did we change" },
+    ]
+    const items = initialItems({ project: "demo", previous, history: [] })
+    expect(items.map((item) => item.content[0].text).slice(0, -1)).toEqual(["what did we change"])
   })
 })

@@ -1,3 +1,5 @@
+import type { InitialItem } from "./context"
+
 /**
  * GPT-Live wire contract for ChatGPT-subscription sessions.
  *
@@ -29,6 +31,8 @@ export interface LiveSession {
   instructions: string
   audio: { output: { voice: string } }
   delegation: { type: "client"; ack_filler?: boolean }
+  /** Conversation the call starts with; see initialItems in context.ts. */
+  initial_items?: readonly InitialItem[]
 }
 
 export class LiveError extends Error {
@@ -114,10 +118,16 @@ export type LiveEvent =
   | { kind: "started" }
   | { kind: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { kind: "delegation"; id: string; text: string }
+  /** A user or GPT-Live turn started (`turn.created`), before any transcript of it. */
+  | { kind: "turn"; role: "user" | "assistant"; id?: string }
+  /** Progress on a started turn (`turn.delta`). */
+  | { kind: "turn-delta"; id: string }
+  /** GPT-Live sent a chunk of spoken audio. */
+  | { kind: "output-audio" }
   | { kind: "speech-cleared" }
   | { kind: "closed"; reason?: string }
   | { kind: "error"; message: string; fatal: boolean }
-  | { kind: "other"; type: string }
+  | { kind: "other"; type: string; keys?: string[] }
 
 type Json = Record<string, unknown>
 
@@ -167,6 +177,18 @@ export function parseEvent(payload: string): LiveEvent | undefined {
         return { kind: "other", type }
       return { kind: "transcript", role: turn.role, text: turn.transcript, final: true }
     }
+    case "turn.created": {
+      const turn = record(event.turn)
+      if (turn?.role !== "user" && turn?.role !== "assistant")
+        return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
+      return { kind: "turn", role: turn.role, ...(typeof turn.id === "string" ? { id: turn.id } : {}) }
+    }
+    case "turn.delta":
+      if (typeof event.turn_id !== "string")
+        return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
+      return { kind: "turn-delta", id: event.turn_id }
+    case "session.output_audio.delta":
+      return { kind: "output-audio" }
     case "delegation.created": {
       const item = record(event.item)
       if (!item || item.type !== "delegation" || item.target !== "client" || typeof item.id !== "string")
@@ -192,7 +214,7 @@ export function parseEvent(payload: string): LiveEvent | undefined {
       return { kind: "error", message: errorMessage(event), fatal }
     }
     default:
-      return { kind: "other", type }
+      return { kind: "other", type, keys: Object.keys(event).filter((key) => key !== "type") }
   }
 }
 

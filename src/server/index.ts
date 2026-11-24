@@ -1,16 +1,18 @@
 import { Plugin } from "@opencode/plugin"
 
 import pkg from "../../package.json" with { type: "json" }
-import { GptLive, VOICES, type Voice } from "../shared/rpc"
+import { GptLive, isPace, isVoice, type Voice } from "../shared/rpc"
 import { resolveAuth } from "./auth"
 import { Bridge } from "./bridge"
-import { background, historyFrom, type HistoryEntry } from "./context"
+import { background, filler, historyFrom, initialItems, type HistoryEntry } from "./context"
 import { LiveError, MODEL, Sideband, createCall, requestIDs } from "./live"
 import { CallLog } from "./log"
-import { loadPrompt } from "./prompt"
+import { loadPrompt, paceHint, wakeHint } from "./prompt"
 
 interface Options {
   voice?: string
+  /** Speaking-pace hint for GPT-Live: normal, slower or faster. */
+  pace?: string
   /** Appended to GPT-Live's prompt. */
   instructions?: string
   /** Appended to the voice agent's prompt. */
@@ -72,7 +74,8 @@ export default Plugin.define({
   id: "opencode-gpt-live",
   async setup(ctx) {
     const options = ctx.options as Options
-    const defaultVoice: Voice = VOICES.includes(options.voice as Voice) ? (options.voice as Voice) : "cove"
+    const defaultVoice: Voice = isVoice(options.voice) ? options.voice : "cove"
+    const defaultPace = isPace(options.pace) ? options.pace : undefined
     const voiceModel = parseModel(options.voiceModel ?? "openai/gpt-6.1-sol", options.voiceVariant ?? "medium")
     let active: Call | undefined
     // Calls outlive a window that crashes or is killed (the server is shared), so the
@@ -232,6 +235,7 @@ export default Plugin.define({
         if (!auth.ok) return error("not_signed_in", auth.reason, { reason: auth.reason })
 
         const voice = input.voice ?? defaultVoice
+        const pace = input.pace ?? defaultPace
         const main = await ctx.session.get({ sessionID: input.sessionID as never }).catch(() => undefined)
         const mainTitle = (main as { title?: string } | undefined)?.title
         const history = await ctx.session
@@ -280,6 +284,8 @@ export default Plugin.define({
         })
         const prompt = agentPrompt.text + background(history)
 
+        // Earlier voice turns and what "the session" means, as context the call starts with.
+        const items = initialItems({ project, title: mainTitle, previous, history })
         const ids = requestIDs()
         let call: { callID: string; sdp: string }
         try {
@@ -293,6 +299,8 @@ export default Plugin.define({
               model: MODEL,
               instructions:
                 livePrompt.text +
+                paceHint(pace) +
+                wakeHint(input.wake) +
                 background(
                   previous,
                   "Your recent voice conversation with this user from earlier calls",
@@ -302,6 +310,7 @@ export default Plugin.define({
                 background(history, undefined, undefined, 4_000),
               audio: { output: { voice } },
               delegation: { type: "client" },
+              initial_items: items,
             },
           })
         } catch (cause) {
@@ -357,6 +366,12 @@ export default Plugin.define({
             sessionID: entry.sessionID,
             voiceSessionID: entry.voiceSessionID,
             voice,
+            pace: pace ?? "normal",
+            wake: input.wake ?? false,
+            context: {
+              items: items.length,
+              bytes: items.reduce((total, item) => total + item.content[0].text.length, 0),
+            },
           })
           let turns = previous.slice()
           entry.bridge = new Bridge(
@@ -366,6 +381,7 @@ export default Plugin.define({
             sideband,
             {
               turn: (role, text) => {
+                if (filler(text)) return
                 turns = [...turns, { role, text }].slice(-TURNS_KEPT)
                 void ctx.storage
                   .set(
@@ -380,6 +396,13 @@ export default Plugin.define({
                 void registration.events.emit("task", defined({ callID: entry.callID, taskID, text, status, detail })),
               activity: (scope, busy, label) =>
                 void registration.events.emit("activity", defined({ callID: entry.callID, scope, busy, label })),
+              handoff: (delegationID, at, step) =>
+                void registration.events.emit("handoff", {
+                  callID: entry.callID,
+                  delegationID,
+                  at,
+                  step: defined(step),
+                }),
               closed: (reason) => finish("closed", reason),
               error: (message) => {
                 log?.write({ type: "error", message })
@@ -428,6 +451,13 @@ export default Plugin.define({
         if (!active?.bridge || active.callID !== input.callID) return { sent: false }
         active.bridge.say(input.text)
         return { sent: true }
+      },
+
+      trace: async (input) => {
+        if (!active?.bridge || active.callID !== input.callID) return { ok: false }
+        for (const event of input.events.slice(0, 100))
+          active.bridge.trace("window", event.type, event.keys, Math.max(1, Math.floor(event.count)))
+        return { ok: true }
       },
     })
 

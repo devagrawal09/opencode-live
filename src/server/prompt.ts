@@ -11,7 +11,27 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import type { Pace } from "../shared/rpc"
+
 export type PromptName = "gpt-live" | "voice-agent"
+
+const PACE_HINTS: Record<Exclude<Pace, "normal">, string> = {
+  slower: "The user prefers a slower speaking pace: speak a bit more slowly than usual, with clear pauses.",
+  faster: "The user prefers a faster speaking pace: speak a bit more quickly than usual, with short pauses.",
+}
+
+/** The sentence appended to GPT-Live's instructions for a pace; nothing for normal. GPT-Live has no speed setting. */
+export function paceHint(pace: Pace | undefined): string {
+  return pace && pace !== "normal" ? `\n\n${PACE_HINTS[pace]}` : ""
+}
+
+const WAKE_HINT =
+  "This call started because the user said the wake word. Do not greet them or introduce yourself: they are about to say what they want, so listen and answer that."
+
+/** The sentence appended to GPT-Live's instructions for a call started from the wake word; nothing otherwise. */
+export function wakeHint(wake: boolean | undefined): string {
+  return wake ? `\n\n${WAKE_HINT}` : ""
+}
 
 export const BUILT_IN_PROMPTS = fileURLToPath(new URL("./prompts/", import.meta.url))
 
