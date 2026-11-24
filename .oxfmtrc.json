@@ -4,13 +4,5 @@
   "semi": false,
   "sortImports": true,
   "sortPackageJson": true,
-  "ignorePatterns": [
-    "native/target",
-    "npm",
-    "bun.lock",
-    "CHANGELOG.md",
-    ".release-please-manifest.json",
-    "src/server/prompts/gpt-live",
-    "src/server/prompts/voice-agent"
-  ]
+  "ignorePatterns": ["bun.lock", "src/server/prompts/gpt-live", "src/server/prompts/voice-agent"]
 }

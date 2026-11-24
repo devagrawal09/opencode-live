@@ -1,40 +1,42 @@
 {
-  "name": "opencode-gpt-live",
+  "name": "opencode-live",
   "version": "0.3.0",
-  "description": "Talk to OpenCode out loud: real-time GPT-Live voice calls on your ChatGPT subscription",
+  "description": "Talk to OpenCode Desktop out loud: real-time GPT-Live voice calls on your ChatGPT subscription",
   "keywords": [
     "chatgpt",
     "gpt-live",
     "opencode",
+    "opencode-desktop",
     "opencode-plugin",
     "realtime",
     "speech",
     "voice",
     "voice-assistant",
+    "wake-word",
     "webrtc"
   ],
-  "homepage": "https://github.com/malhashemi/opencode-gpt-live#readme",
-  "bugs": "https://github.com/malhashemi/opencode-gpt-live/issues",
+  "homepage": "https://github.com/devagrawal09/opencode-live#readme",
+  "bugs": "https://github.com/devagrawal09/opencode-live/issues",
   "license": "MIT",
-  "author": "M. Adel Alhashemi (https://github.com/malhashemi)",
+  "author": "Dev Agrawal (https://github.com/devagrawal09)",
+  "contributors": [
+    "M. Adel Alhashemi (https://github.com/malhashemi)"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/malhashemi/opencode-gpt-live.git"
+    "url": "git+https://github.com/devagrawal09/opencode-live.git"
   },
   "files": [
     "index.ts",
-    "tui.ts",
     "dist/gui-experimental.cjs",
     "src",
     "README.md",
     "LICENSE",
-    "NOTICE",
-    "CHANGELOG.md"
+    "NOTICE"
   ],
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./tui": "./tui.ts",
     "./gui-experimental": "./dist/gui-experimental.cjs",
     "./rpc": "./src/shared/rpc.ts"
   },
@@ -50,8 +52,6 @@
     "lint:fix": "oxlint --fix",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.gui.json",
     "test": "bun test",
-    "build:native": "cargo build --release --manifest-path native/Cargo.toml",
-    "e2e": "bun scripts/e2e-call.ts",
     "build:gui": "vite build",
     "dev:gui": "vite build --watch"
   },
@@ -62,8 +62,6 @@
   "devDependencies": {
     "@livekit/wakeword": "2.1.3",
     "@opencode/client": "2.3.0",
-    "@opencode/theme": "2.0.14",
-    "@opentui/core": "0.5.12",
     "@types/bun": "latest",
     "@types/node": "^26.6.6",
     "electron": "^45.4.1",
@@ -75,10 +73,7 @@
     "vite": "^7",
     "vite-plugin-solid": "^2.11.17"
   },
-  "peerDependencies": {
-    "@opentui/core": ">=0.5.10"
-  },
   "engines": {
-    "opencode": ">=2.0.20"
+    "opencode": ">=2.3.0"
   }
 }

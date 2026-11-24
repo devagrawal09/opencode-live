@@ -28,5 +28,5 @@
     "eslint/no-var": "error",
     "eslint/prefer-const": "error"
   },
-  "ignorePatterns": ["native/target/**", "npm/**"]
+  "ignorePatterns": []
 }

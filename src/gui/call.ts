@@ -79,7 +79,7 @@ const HEARTBEAT = 5_000
 const IDLE_CHECK = 1_000
 
 /**
- * One window's voice call, as `src/tui/controller.ts` is for the terminal: audio in the window, the server part's
+ * One window's voice call: audio in the window, the server part's
  * RPC, heartbeats, and the state the panel and the composer pill render.
  */
 export function createCall(options: Options) {

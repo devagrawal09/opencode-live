@@ -1,7 +1,7 @@
 /**
- * The call's audio in a desktop window: microphone, WebRTC peer and speaker, replacing the native helper.
+ * The call's audio in a desktop window: microphone, WebRTC peer and speaker.
  *
- * It negotiates what `native/src/transport.rs` does: one send/receive Opus audio track and the `oai-events` data
+ * It negotiates one send/receive Opus audio track and the `oai-events` data
  * channel, with non-trickle ICE (the offer carries every candidate). Chromium's WebRTC stack provides echo
  * cancellation, noise suppression and gain control through `getUserMedia`.
  */
